@@ -1,0 +1,46 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'maven-publish'
+
+android {
+    namespace = 'com.apexpathing'
+    compileSdk 34
+
+    defaultConfig {
+        minSdkVersion 24
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+dependencies {
+    // FTC SDK — compileOnly so consumers provide their own version
+
+    //noinspection Aligned16KB
+    compileOnly 'org.firstinspires.ftc:RobotCore:11.1.0'
+    compileOnly 'org.firstinspires.ftc:Hardware:11.1.0'
+    compileOnly 'org.firstinspires.ftc:FtcCommon:11.1.0'
+
+    testImplementation 'junit:junit:4.13.2'
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+
+                groupId = 'com.github.MooseX-Pathing'
+                artifactId = 'ApexPathing'
+                version = project.findProperty('VERSION_NAME') ?: '1.0.0'
+            }
+        }
+    }
+}
