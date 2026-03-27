@@ -31,8 +31,22 @@ public class Pose {
     }
 
     // Getters / Setters
+
+    /**
+     * Gets the x position
+     * @return
+     */
     public double getX() { return x; }
+
+    /**
+     * gets the y position
+     * @return
+     */
     public double getY() { return y; }
+    /**
+     * gets the heading position
+     * @return
+     */
     public double getHeading() { return heading; }
 
     public void setX(double x) { this.x = x; }
@@ -166,6 +180,12 @@ public class Pose {
         return rotated(theta, theta);
     }
 
+    /**
+     * rotate a pose
+     * @param theta
+     * @param headingTheta
+     * @return the new Pose
+     */
     public Pose rotated(double theta, double headingTheta) {
         return new Pose(
                 x * cos(theta) - y * sin(theta),
