@@ -4,29 +4,39 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
+import java.util.List;
+
 /**
  * Mecanum Drivetrain controller class
  * @author Xander Haemel - 31616 - 404 Not Found
+ * @author Sohum Arora - 22985 Paraducks
  */
-public class MecanumDrive {
-    //decleration field
+public class MecanumDrive extends Drivetrain{
     MecanumConstants mechconstants;
+    private final double maxPower = 1.0;
+    private final List<DcMotorEx> motors;
+    private final double[] lastMotorPowers;
+
     //motors
     DcMotorEx lf;
     DcMotorEx lr;
     DcMotorEx rf;
     DcMotorEx rr;
 
-
-
-    //constructor
-    public MecanumDrive(HardwareMap hardwareMap, MecanumConstants constants){
+    //Constructor
+    public MecanumDrive(HardwareMap hardwareMap, MecanumConstants constants, List<DcMotorEx> motors, double[] lastMotorPowers){
         this.mechconstants = constants;
+        this.motors = motors;
+        this.lastMotorPowers = lastMotorPowers;
         String [] names =  mechconstants.getMotorNames();
         lf = hardwareMap.get(DcMotorEx.class, names[0]);
-        lr = hardwareMap.get(DcMotorEx.class, names[0]);
-        rf = hardwareMap.get(DcMotorEx.class, names[0]);
-        rr = hardwareMap.get(DcMotorEx.class, names[0]);
+        lr = hardwareMap.get(DcMotorEx.class, names[1]);
+        rf = hardwareMap.get(DcMotorEx.class, names[2]);
+        rr = hardwareMap.get(DcMotorEx.class, names[3]);
+
+        //Reversing motors
+        rf.setDirection(DcMotor.Direction.REVERSE);
+        rr.setDirection(DcMotor.Direction.REVERSE);
     }
 
     /**
@@ -38,9 +48,9 @@ public class MecanumDrive {
     public void setPowers(double drive, double strafe, double turn){
         double [] powers = calculatePower(drive, strafe, turn);
         lf.setPower(powers[0]);
-        lf.setPower(powers[1]);
-        lf.setPower(powers[2]);
-        lf.setPower(powers[3]);
+        lr.setPower(powers[1]);
+        rf.setPower(powers[2]);
+        rr.setPower(powers[3]);
     }
 
     /**
@@ -59,6 +69,51 @@ public class MecanumDrive {
         //return
         return  calculatedPowers;
     }
+    public void botCentricDrive(double x, double y, double turn) {
+        double adjX = deadzone(x, 0.05);
+        double adjY = deadzone(y, 0.05);
+        double adjTurn = deadzone(turn, 0.05);
 
+        double[] powers = {
+                adjY + adjX + adjTurn,   // left front
+                adjY - adjX + adjTurn,   // left rear
+                adjY - adjX - adjTurn,   // right front
+                adjY + adjX - adjTurn    // right rear
+        };
 
+        normalizePowers(powers);
+        runDrive(powers);
+    }
+    private static double deadzone(double value, double threshold) {
+        return Math.abs(value) < threshold ? 0.0 : value;
+    }
+    private void normalizePowers(double[] powers) {
+        double max = 0;
+        for (double p : powers) {
+            max = Math.max(max, Math.abs(p));
+        }
+        if (max > maxPower)
+            for (int i = 0; i < powers.length; i++) powers[i] = (powers[i] / max) * maxPower;
+    }
+    public void runDrive(double[] drivePowers) {
+        for (int i = 0; i < motors.size(); i++) {
+            boolean changed  = Math.abs(lastMotorPowers[i] - drivePowers[i]) > 0.01;
+            boolean zeroed   = drivePowers[i] == 0 && lastMotorPowers[i] != 0;
+            if (changed || zeroed) {
+                lastMotorPowers[i] = drivePowers[i];
+                setPower(motors.get(i), drivePowers[i]);
+            }
+        }
+    }
+    @Override
+    public void setPower(DcMotorEx motor, double power) {
+        motor.setPower(power);
+    }
+
+    @Override
+    public void setPower(List<DcMotorEx> motors, double power) {
+        for (DcMotorEx motor : motors) {
+            motor.setPower(power);
+        }
+    }
 }
