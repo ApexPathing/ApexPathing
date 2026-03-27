@@ -45,7 +45,7 @@ public class MecanumDrive extends Drivetrain{
      * @param strafe the power to strafe
      * @param turn the power to turn
      */
-    public void setPowers(double drive, double strafe, double turn){
+    public void drive(double drive, double strafe, double turn){
         double [] powers = calculatePower(drive, strafe, turn);
         lf.setPower(powers[0]);
         lr.setPower(powers[1]);
@@ -60,14 +60,13 @@ public class MecanumDrive extends Drivetrain{
      * @param turn the power to turn
      */
     private double [] calculatePower(double drive, double strafe, double turn){
+        //calculate based on mech eequation
         double lfPower = drive + strafe + turn;
         double lrPower = drive - strafe + turn;
         double rfPower = drive -strafe - turn;
         double rrPower = drive + strafe - turn;
-        //format powers
-        double [] calculatedPowers = {lfPower,lrPower,rfPower,rrPower};
         //return
-        return  calculatedPowers;
+        return new double[]{lfPower,lrPower,rfPower,rrPower};
     }
     public void botCentricDrive(double x, double y, double turn) {
         double adjX = deadzone(x, 0.05);

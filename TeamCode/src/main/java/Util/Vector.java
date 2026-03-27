@@ -8,15 +8,17 @@ import static java.lang.Math.*;
  * Provides methods for arithmetic using vectors as well as for transformations.
  *
  * @author Sohum Arora
+ * @author Xander Haemel - 31616 - 404 Not Found
  */
 public class Vector {
 
     private double x;
     private double y;
+    //default constructor
     public Vector() {
         this(0.0, 0.0);
     }
-
+    //
     public Vector(double x, double y) {
         this.x = x;
         this.y = y;
