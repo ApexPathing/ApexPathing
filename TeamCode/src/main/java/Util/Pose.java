@@ -145,12 +145,19 @@ public class Pose {
         );
     }
 
+<<<<<<< HEAD
     // Rotation
+=======
+    // Rotation (FIXED bug here)
+>>>>>>> 5e9d75400a1896ae8936189bff63bffa3688d89b
     public Pose rotate(double theta) {
         return rotate(theta, theta);
     }
 
+<<<<<<< HEAD
     //rotate a pose
+=======
+>>>>>>> 5e9d75400a1896ae8936189bff63bffa3688d89b
     public Pose rotate(double theta, double headingTheta) {
         double newX = x * cos(theta) - y * sin(theta);
         double newY = x * sin(theta) + y * cos(theta);
@@ -179,10 +186,13 @@ public class Pose {
         return distanceFrom(other) < threshold;
     }
 
+<<<<<<< HEAD
     /**
      * duplicate a pose
      * @return copied pose
      */
+=======
+>>>>>>> 5e9d75400a1896ae8936189bff63bffa3688d89b
     public Pose copy() {
         return new Pose(x, y, heading);
     }

@@ -3,7 +3,11 @@ package Drivetrains;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 
 /**
+<<<<<<< HEAD
  * Mecanum Constants class
+=======
+ * Mecanum COnstants class
+>>>>>>> 5e9d75400a1896ae8936189bff63bffa3688d89b
  * @author Xander Haemel - 31616 404 Not Found
  */
 public class MecanumConstants {
