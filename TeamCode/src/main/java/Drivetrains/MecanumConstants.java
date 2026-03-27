@@ -10,7 +10,7 @@ public class MecanumConstants {
     //velocities (get from tuning)
     public final double xVelocity = 60; //inches per second
     public final double yVelocity = 60; //inches per second
-
+    //Todo add vector class
     //dc motor names
     public final String leftFrontMotorName = "leftFront";
     public final String leftRearMotorName = "leftRear";
@@ -24,7 +24,7 @@ public class MecanumConstants {
     public final DcMotorSimple.Direction rightRearDirection = DcMotorSimple.Direction.FORWARD;
 
     //misc
-    public double MaxPower = 1.0;
+    public double maxPower = 1.0;
 
     //booleans
     public boolean useBrakingMode = false;
@@ -37,6 +37,35 @@ public class MecanumConstants {
     public MecanumConstants(){
 
     }
+
+    //getter methods
+
+    /**
+     * getter for the motor names
+     * @return String [4] of the motor names as shown below
+     */
+    public String [] getMotorNames(){
+        String [] toReturn = new String[4];
+        toReturn[0] = leftFrontMotorName;
+        toReturn[1] = leftRearMotorName;
+        toReturn[2] = rightFrontMotorName;
+        toReturn[3] = rightRearMotorName;
+        return  toReturn;
+    }
+    /**
+     * getter for the motor directions
+     * @return DcMotorSimple.Direction [4] of the motor names as shown below
+     */
+    public DcMotorSimple.Direction [] getMotorDirections(){
+        DcMotorSimple.Direction [] toReturn = new DcMotorSimple.Direction[4];
+        toReturn[0] = leftFrontDirection;
+        toReturn[1] = leftRearDirection;
+        toReturn[2] = rightFrontDirection;
+        toReturn[3] = rightRearDirection;
+        return  toReturn;
+    }
+
+
 
 }
 
