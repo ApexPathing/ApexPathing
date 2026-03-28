@@ -8,15 +8,17 @@ import static java.lang.Math.*;
  * Provides methods for arithmetic using vectors as well as for transformations.
  *
  * @author Sohum Arora
+ * @author Xander Haemel - 31616 - 404 Not Found
  */
 public class Vector {
 
-    public double x;
-    public double y;
+    private double x;
+    private double y;
+    //default constructor
     public Vector() {
         this(0.0, 0.0);
     }
-
+    //
     public Vector(double x, double y) {
         this.x = x;
         this.y = y;
@@ -27,14 +29,25 @@ public class Vector {
         return new Vector(r * cos(theta), r * sin(theta));
     }
 
-
+    /**
+     * gets the x component of the vector
+     * @return the x
+     */
     public double getX() { return x; }
+    /**
+     * gets the y component of the vector
+     * @return the y
+     */
     public double getY() { return y; }
+
 
     public void setX(double x) { this.x = x; }
     public void setY(double y) { this.y = y; }
 
-
+    /**
+     * gets the magnitude of the vector
+     * @return
+     */
     public double getMagnitude() {
         return hypot(x, y);
     }

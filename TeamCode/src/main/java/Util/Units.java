@@ -13,6 +13,13 @@ public class Units {
         MILLIMETERS,
         FEET
     }
+
+    /**
+     * converts a given unit
+     * @param unit, object of the DistanceUnits class
+     * @param value: value of this unit
+     * @return the unit you gave, now converted to inches
+     */
     public static double toInches(DistanceUnits unit, double value) {
         switch (unit) {
             case INCHES: return value;
@@ -24,6 +31,12 @@ public class Units {
         }
     }
 
+    /**
+     * converts a given unit
+     * @param unit, object of the DistanceUnits class
+     * @param value: value of this unit
+     * @return the unit you gave, now converted to meters
+     */
     public static double toMeters(DistanceUnits unit, double value) {
         switch (unit) {
             case METERS: return value;
@@ -34,7 +47,12 @@ public class Units {
             default: return value;
         }
     }
-
+    /**
+     * converts a given unit
+     * @param unit, object of the DistanceUnits class
+     * @param value: value of this unit
+     * @return the unit you gave, now converted to centimeters
+     */
     public static double toCentimeters(DistanceUnits unit, double value) {
         switch (unit) {
             case CENTIMETERS: return value;
@@ -45,7 +63,12 @@ public class Units {
             default: return value;
         }
     }
-
+    /**
+     * converts a given unit
+     * @param unit, object of the DistanceUnits class
+     * @param value: value of this unit
+     * @return the unit you gave, now converted to millimeters
+     */
     public static double toMillimeters(DistanceUnits unit, double value) {
         switch (unit) {
             case MILLIMETERS: return value;
@@ -56,7 +79,12 @@ public class Units {
             default: return value;
         }
     }
-
+    /**
+     * converts a given unit
+     * @param unit, object of the DistanceUnits class
+     * @param value: value of this unit
+     * @return the unit you gave, now converted to feet
+     */
     public static double toFeet(DistanceUnits unit, double value) {
         switch (unit) {
             case FEET: return value;
@@ -68,14 +96,25 @@ public class Units {
         }
 
     }
+    //default constructor
     public enum AngleUnits {
         DEGREES, RADIANS
     }
 
+    /**
+     * converts radians to degrees
+     * @param value the value in radians to be converted
+     * @return the new value, converted to degrees
+     */
     public static double toDegrees(double value) {
         return Math.toDegrees(value);
     }
 
+    /**
+     * converts degrees to radians
+     * @param value the value in degrees to be converted
+     * @return the new value, converted to radians
+     */
     public static double toRadians(double value) {
         return Math.toRadians(value);
     }
