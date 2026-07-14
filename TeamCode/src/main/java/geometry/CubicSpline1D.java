@@ -1,5 +1,16 @@
 package geometry;
 
+/**
+ * Represents a 1D cubic spline for interpolation.
+ *
+ * <p>
+ * This class constructs a cubic spline based on given x and y data points. It provides methods to
+ * evaluate the spline and its first and second derivatives at any point within the range of the
+ * input data.
+ * </p>
+ *
+ * @author DrPixelCat - 7842 alum
+ */
 public class CubicSpline1D {
     private final double[] x;
     private final double[] a, b, c, d;

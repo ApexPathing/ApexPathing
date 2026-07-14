@@ -7,99 +7,137 @@ import com.qualcomm.robotcore.hardware.IMU;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
 import geometry.Angle;
-import geometry.Dist;
+import geometry.GeometryFactory;
 import geometry.Pose;
 import geometry.Vector;
-import util.DistUnit;
+import geometry.DistUnit;
 
 /**
- * This is the localizer for 2 dead wheel odometry featuring 1 parallel and 1 perpendicular wheel
+ * A localizer that uses 2 dead wheel odometry pods (1 parallel and 1 perpendicular)
  *
- * @author Topher F. - 23571 alumni
+ * @author Topher F. - 23571 alum
+ * @author Dylan B. - 18597 RoboClovers - Delta
  */
-public class TwoWheel extends BaseLocalizer<TwoWheel.Config> {
-    private final OdometryPod strafePod;
-    private final OdometryPod forwardPod;
+public class TwoWheel extends BaseLocalizer<TwoWheel.Constants> {
+    private final static GeometryFactory factory = new GeometryFactory()
+            .setDistUnit(DistUnit.IN).setAngleUnit(geometry.AngleUnit.RAD);
+    private final OdometryPod forwardPod, strafePod;
     private final IMU imu;
-
-    /**
-     * This variable is when we call setPose(), the yaw can be properly offset back, it's just
-     * the yaw the bot
-     * was at prior to setPose() being called
-     */
+    private final double forwardOffsetIn, strafeOffsetIn;
     private double correction = 0.0;
+
+    public TwoWheel(Constants constants, HardwareMap hardwareMap) {
+        super(constants);
+
+        this.strafePod = new OdometryPod(
+                hardwareMap, constants.strafePodName, constants.ticksPerInch
+        );
+        this.forwardPod = new OdometryPod(
+                hardwareMap, constants.forwardPodName, constants.ticksPerInch
+        );
+        this.imu = hardwareMap.get(IMU.class, constants.imuName);
+        this.imu.initialize(new IMU.Parameters(constants.hubOrientation));
+
+        this.forwardOffsetIn = constants.offsets.getX(DistUnit.IN);
+        this.strafeOffsetIn = constants.offsets.getY(DistUnit.IN);
+    }
 
     @Override
     public void update() {
-        double oldYaw = pose.getHeading(util.AngleUnit.RAD);
-        double currentYaw =
-                Angle.normalize(imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) - correction);
+        double oldYaw = pose.getHeading(geometry.AngleUnit.RAD);
+        double currentYaw = Angle.normalize(
+                imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) - correction
+        );
         double deltaYaw = Angle.normalize(currentYaw - oldYaw);
         double avgYaw = oldYaw + deltaYaw / 2.0;
-        double deltaX = forwardPod.getDeltaInches() - config.DPar.get(DistUnit.IN) * deltaYaw;
-        double deltaY = strafePod.getDeltaInches() - config.DPerp.get(DistUnit.IN) * deltaYaw;
-        pose = new Pose(
-                pose.getVec().plus(
-                        new Vector(
-                                Dist.fromIn(deltaX * Math.cos(avgYaw) - (deltaY * Math.sin(avgYaw))),
-                                Dist.fromIn(deltaX * Math.sin(avgYaw) + deltaY * Math.cos(avgYaw))
-                        )),
-
-                Angle.fromRad(currentYaw)
+        double deltaX = forwardPod.getDeltaInches() - forwardOffsetIn * deltaYaw;
+        double deltaY = strafePod.getDeltaInches() - strafeOffsetIn * deltaYaw;
+        factory.pose(
+                pose.getX(DistUnit.IN) + (deltaX * Math.cos(avgYaw) - deltaY * Math.sin(avgYaw)),
+                pose.getY(DistUnit.IN) + (deltaX * Math.sin(avgYaw) + deltaY * Math.cos(avgYaw)),
+                currentYaw
         );
+
         calculate(UpdateType.BOTH);
     }
 
 
     @Override
     public void setPose(Pose newPose) {
-        correction =
-                imu.getRobotYawPitchRollAngles().getYaw(org.firstinspires.ftc.robotcore.external.navigation.AngleUnit.RADIANS) - newPose.getHeading(util.AngleUnit.RAD);
+        correction = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) -
+                newPose.getHeading(geometry.AngleUnit.RAD);
         pose = newPose;
-        strafePod.resetEncoder();
-        forwardPod.resetEncoder();
+        strafePod.reset();
+        forwardPod.reset();
     }
 
-    public static class Config extends BaseLocalizerConfig<TwoWheel.Config> {
-        public String forwardPodName = "forwardPodName";
-        public String strafePodName = "strafePodName";
-        public String imuName = "imu";
-
-        /**
-         * DPar is the distance from the center of the bot to the parallel dead wheel
-         */
-        public Dist DPar = Dist.fromIn(1.0);
-
-        /**
-         * DPerp is the distance from the center of the bot to the perpendicular dead wheel
-         */
-        public Dist DPerp = Dist.fromIn(1.0);
-
-        // Default to facing logo facing forward and USB facing up
-        public RevHubOrientationOnRobot hubOrientationOnRobot =
-                new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.FORWARD
-                        , RevHubOrientationOnRobot.UsbFacingDirection.UP);
-
-        // Default 1 tick on the encoder to 1.0 inches (very wrong, will let user know if
-        // something is up)
-        public double inchConversion = 1.0;
+    public static class Constants extends BaseLocalizerConstants<Constants> {
+        public String forwardPodName = null;
+        public String strafePodName = null;
+        public String imuName = null;
+        public RevHubOrientationOnRobot hubOrientation = null;
+        public Vector offsets = Vector.zero();
+        public double ticksPerInch = 1.0;
 
         @Override
         public BaseLocalizer<?> build(HardwareMap hardwareMap) {
+            if (this.forwardPodName == null || this.strafePodName == null) {
+                throw new IllegalArgumentException(
+                        "You must call setForwardPodName and setStrafePodName to set the names of " +
+                                "the motor ports that hold the odometry pod encoders."
+                );
+            }
+
+            if (this.imuName == null) {
+                throw new IllegalArgumentException(
+                        "You must call setIMUName to set the name of the control hub IMU"
+                );
+            }
+
+            if (this.hubOrientation == null) {
+                throw new IllegalArgumentException(
+                        "You must call setHubOrientation to set the orientation of the control hub " +
+                                "on the robot"
+                );
+            }
+
             return new TwoWheel(this, hardwareMap);
         }
-    }
 
-    public void resetYaw() {
-        imu.resetYaw();
-    }
+        /** Sets the name of the motor that the forward pod encoder is attached to. */
+        public TwoWheel.Constants setForwardPodName(String name) {
+            this.forwardPodName = name;
+            return this;
+        }
 
-    public TwoWheel(TwoWheel.Config config, HardwareMap hardwareMap) {
-        super(config);
+        /** Sets the name of the motor that the strafe pod encoder is attached to. */
+        public TwoWheel.Constants setStrafePodName(String name) {
+            this.strafePodName = name;
+            return this;
+        }
 
-        strafePod = new OdometryPod(hardwareMap, config.strafePodName, config.inchConversion);
-        forwardPod = new OdometryPod(hardwareMap, config.forwardPodName, config.inchConversion);
-        imu = hardwareMap.get(IMU.class, config.imuName);
-        imu.initialize(new IMU.Parameters(config.hubOrientationOnRobot));
+        /** Sets the name of the control hub IMU that is used to measure heading */
+        public TwoWheel.Constants setIMUName(String name) {
+            this.imuName = name;
+            return this;
+        }
+
+        /** Sets the orientation of the control hub on the robot. */
+        public TwoWheel.Constants setHubOrientation(RevHubOrientationOnRobot orientation) {
+            this.hubOrientation = orientation;
+            return this;
+        }
+
+        /** Sets the offsets of the odometry pods from the robot center. */
+        public TwoWheel.Constants setOffsets(Vector offsets) {
+            this.offsets = offsets;
+            return this;
+        }
+
+        /** Sets the number of encoder ticks per inch of travel. */
+        public TwoWheel.Constants setTicksPerInch(double ticksPerInch) {
+            this.ticksPerInch = ticksPerInch;
+            return this;
+        }
     }
 }

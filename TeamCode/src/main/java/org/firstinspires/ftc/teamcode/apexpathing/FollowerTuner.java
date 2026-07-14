@@ -4,149 +4,146 @@ import com.bylazar.configurables.annotations.Configurable;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
-import org.firstinspires.ftc.teamcode.apexpathing.tuning.HeadingPhase;
-import org.firstinspires.ftc.teamcode.apexpathing.tuning.TranslationPhase;
-import org.firstinspires.ftc.teamcode.apexpathing.tuning.TunerContext;
-import org.firstinspires.ftc.teamcode.apexpathing.tuning.TuningPhase;
-import org.firstinspires.ftc.teamcode.apexpathing.tuning.VelocityFeedforwardPhase;
+import tuning.TunerContext;
+import tuning.TuningPhase;
+import tuning.HeadingPhase;
+import tuning.TranslationalPhase;
+import tuning.VelocityFeedforwardPhase;
+import tuning.MovementLimitsPhase;
 
-import core.ApexConfig;
 import core.Follower;
-import core.FollowerConstants;
-import drivetrains.BaseDrivetrainConfig;
-import localizers.BaseLocalizerConfig;
+import geometry.Pose;
 
 /**
- * Single unified automatic tuner capable of completely tuning a robot for Apex in minutes in
- * just a single OpMode!
- * All you have to do is follow the telemetry instructions and press a couple buttons here and
- * there.
- * Once you have run this tuner, your robot is fully tuned and ready to go Path its way to the
- * Peaks.
+ * Unified follower tuning class for Apex Pathing
  *
- * @author Sohum Arora 22985 Paraducks
+ * @author Sohum Arora - 22985 Paraducks
+ * @author Dylan B. - 18597 RoboClovers - Delta
  */
 @Configurable
 @TeleOp(name = "Follower Tuner", group = "Apex Pathing Tuning")
 public class FollowerTuner extends LinearOpMode {
+    private final TunerContext context = new TunerContext(this);
 
-    public static double kSGuess = 0.0;
+    private String[] phaseSelectorStatuses;
+    private int selectedPhaseIndex = 0;
+    private TuningPhase runningPhase = null;
 
-    private final Constants baseConstants = new Constants();
-    private final FollowerConstants followerConstants = new FollowerConstants();
-    private final TunerContext tunerContext = new TunerContext(this, followerConstants);
-
-    private TuningPhase phase = new HeadingPhase(tunerContext);
-    private boolean lastA;
-    private boolean lastB;
-    private boolean lastY;
-    private boolean paused;
+    enum Phase { HEADING_PDS, TRANSLATIONAL_PDS, VELOCITY_FEEDFORWARD, MOVEMENT_LIMITS }
+    private static final Phase[] phases = {
+            Phase.HEADING_PDS,
+            Phase.TRANSLATIONAL_PDS,
+            Phase.VELOCITY_FEEDFORWARD,
+            Phase.MOVEMENT_LIMITS
+    };
 
     @Override
-    public void runOpMode() throws InterruptedException {
-        FollowerConstants defaults = baseConstants.followerConfig().getConstants();
-        tunerContext.loadFrom(defaults);
+    public void runOpMode() {
+        context.setFollower(new Follower(new Constants(), hardwareMap));
+        resetPhaseSelectionData(); // Initialize the phase selector statuses
 
-        boolean headingRun =
-                defaults.headingCoeffs.kP != 0.0 || defaults.headingCoeffs.kD != 0.0 || defaults.headingCoeffs.kS != 0.0;
-        boolean translationRun =
-                defaults.translationalCoeffs.kP != 0.0 || defaults.translationalCoeffs.kD != 0.0 || defaults.translationalCoeffs.kS != 0.0;
-        boolean velocityFFRun = defaults.translationalKV != 0.0;
-        boolean accelRun = defaults.strafeAccelerationLimit.getIn() > 10.0;
-
-        while (opModeInInit()) {
-            telemetry.addLine("Robot Initialized");
-            telemetry.addLine("Tuning order:\n 1) Heading PDS \n 2) Translation PDS \n 3) " +
-                    "Velocity FF \n 4) Max Lateral Accel");
-            telemetry.addLine("Run the OpMode to proceed with the Heading Tuner");
-
-            if (headingRun)
-                telemetry.addLine("Heading tuner has already been run and values have been saved");
-            if (translationRun)
-                telemetry.addLine("Translation tuner has already been run and values have been " +
-                        "saved");
-            if (velocityFFRun)
-                telemetry.addLine("Velocity FF tuner has already been run and values have been " +
-                        "saved");
-            if (accelRun)
-                telemetry.addLine("Max Lateral Accel tuner has already been run and values have " +
-                        "been saved");
-
-            telemetry.addLine("A - Run the Translation Tuner if Heading Tuner has been run. ");
-            telemetry.addLine("B - Run the Velocity FF Tuner if Heading & Translation tuners have" +
-                    " been run. ");
-            telemetry.addLine("Once all 3 complete, press A to run Max Lateral Accel Tuner. ");
-            telemetry.addLine("WARNING: Do NOT run the tuners out of order");
-
-            if (gamepad1.a) {
-                phase = new TranslationPhase(tunerContext);
-            } else if (gamepad1.b) {
-                phase = new VelocityFeedforwardPhase(tunerContext);
+        while (opModeInInit() && runningPhase == null) {
+            TuningPhase selectedPhase = phaseSelector(); // Will remain null until a phase is selected
+            if (selectedPhase != null) {
+                runningPhase = selectedPhase;
             }
-
-            telemetry.addData("Selected Phase", phase.phase());
-            telemetry.update();
         }
 
-        tunerContext.updateFollowerConfig();
-        tunerContext.setFollower(new Follower(customConfig, hardwareMap));
+        if (runningPhase != null) {
+            context.getFollower().setPose(Pose.zero());
+            telemetry.addLine("Press the start button to run the tuner");
+            telemetry.addLine("Make sure you have adequate space to run the robot safely!");
+            telemetry.update();
+        } else {
+            requestOpModeStop(); // The OpMode was started without a phase, so we stop it
+        }
 
         waitForStart();
-        captureCurrentButtons();
 
-        while (opModeIsActive() && phase != null && !isStopRequested()) {
-            boolean aPressed = gamepad1.a && !lastA;
-            boolean bPressed = gamepad1.b && !lastB;
-            boolean yPressed = gamepad1.y && !lastY;
-
-            handlePause(yPressed);
-
-            if (paused && phase.isRunningAutomatic()) {
-                tunerContext.stopDrive();
-                telemetry.addLine("Tuner Paused, Y to resume.");
-                captureCurrentButtons();
-                telemetry.update();
-                continue;
+        while (opModeIsActive()) {
+            if (runningPhase == null) {
+                continue; // OpMode stop was requested already, do nothing
             }
-
-            phase = phase.update(aPressed, bPressed);
-
-            captureCurrentButtons();
-            telemetry.update();
-        }
-
-        while (opModeIsActive() && !isStopRequested()) {
-            telemetry.addData("Status", "All Tuning Cycles Complete! Configuration Saved to JSON.");
-            telemetry.update();
-            tunerContext.stopDrive();
+            context.getFollower().update();
+            boolean complete = runningPhase.update(gamepad1.aWasPressed(), gamepad1.bWasPressed());
+            if (complete) {
+                runningPhase = null;
+                context.constants.drivetrainType = context.getFollower().getDrivetrain()
+                        .getDrivetrainType();
+                context.saveConstants();
+                requestOpModeStop();
+            }
         }
     }
 
-    private void handlePause(boolean yPressed) {
-        if (!yPressed || phase == null || !phase.isRunningAutomatic()) {
-            return;
-        }
+    private void resetPhaseSelectionData() {
+        boolean headingIsTuned = context.constants.headingCoeffs.kP != 0.0;
+        boolean translationalIsTuned = context.constants.translationalCoeffs.kP != 0.0;
+        boolean velocityFFIsTuned = context.constants.translationalKV != 0.0;
+        boolean movementLimitsIsTuned = context.constants.strafeAccelLimitIn != 0.0;
 
-        paused = !paused;
-        if (!paused) {
-            phase.onResume();
+        String headingStatus = headingIsTuned ? "[✓]" : "[ ]"; // Heading is always available to tune first.
+        String transStatus = translationalIsTuned ? "[✓]" : (headingIsTuned ? "[ ]" : "[X]");
+        String velStatus = velocityFFIsTuned ? "[✓]" : (translationalIsTuned ? "[ ]" : "[X]");
+        String movementStatus = movementLimitsIsTuned ? "[✓]" : (velocityFFIsTuned ? "[ ]" : "[X]");
+        this.phaseSelectorStatuses = new String[]{
+                headingStatus, transStatus, velStatus, movementStatus
+        };
+
+        this.selectedPhaseIndex = 0;
+        for (int i = 0; i < phaseSelectorStatuses.length; i++) {
+            if (phaseSelectorStatuses[i].equals("[ ]")) {
+                this.selectedPhaseIndex = i;
+                break;
+            }
         }
     }
 
-    private void captureCurrentButtons() {
-        lastA = gamepad1.a;
-        lastB = gamepad1.b;
-        lastY = gamepad1.y;
+    private TuningPhase phaseSelector() {
+        telemetry.addLine(
+                "The Apex Pathing tuners are listed in order of execution below."
+        );
+        telemetry.addLine(
+                "[✓] = Already Tuned (you can still select to retune)," +
+                        "[X] = Not available to tune (incomplete tuners before it)," +
+                        "[ ] = Next tuner to run. The cursor ('<') is here by default."
+        );
+        telemetry.addLine("Use the DPad Up and Down buttons to cycle through phases, " +
+                "then press B to open the selected phase.");
+        telemetry.addLine();
+
+        for (int i = 0; i < phases.length; i++) {
+            String cursor = (i == selectedPhaseIndex) ? " <" : "";
+            telemetry.addLine(phaseSelectorStatuses[i] + " " +
+                    phases[i].toString().replace("_", " ") + cursor);
+        }
+        telemetry.update();
+
+        if (gamepad1.dpadUpWasPressed()) {
+            selectedPhaseIndex = (selectedPhaseIndex - 1 + phases.length) % phases.length;
+            // Don't allow selection of unavailable phases
+            while (phaseSelectorStatuses[selectedPhaseIndex].equals("[X]")) {
+                selectedPhaseIndex = (selectedPhaseIndex - 1 + phases.length) % phases.length;
+            }
+        } else if (gamepad1.dpadDownWasPressed()) {
+            selectedPhaseIndex = (selectedPhaseIndex + 1) % phases.length;
+            while (phaseSelectorStatuses[selectedPhaseIndex].equals("[X]")) {
+                selectedPhaseIndex = (selectedPhaseIndex + 1) % phases.length;
+            }
+        } else if (gamepad1.bWasPressed()) {
+            Phase selectedPhase = phases[selectedPhaseIndex];
+            switch (selectedPhase) {
+                case HEADING_PDS:
+                    return new HeadingPhase(context);
+                case TRANSLATIONAL_PDS:
+                    return new TranslationalPhase(context);
+                case VELOCITY_FEEDFORWARD:
+                    return new VelocityFeedforwardPhase(context);
+                case MOVEMENT_LIMITS:
+                    return new MovementLimitsPhase(context);
+            }
+        }
+
+        return null; // Phase hasn't been selected yet
     }
-
-    private final ApexConfig customConfig = new ApexConfig() {
-        @Override
-        public BaseDrivetrainConfig<?> drivetrainConfig() {return baseConstants.drivetrainConfig();}
-
-        @Override
-        public BaseLocalizerConfig<?> localizerConfig() {return baseConstants.localizerConfig();}
-
-        @Override
-        public FollowerConstants followerConfig() {return followerConstants;}
-    };
 }

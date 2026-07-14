@@ -3,12 +3,12 @@ package paths.builders;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Function;
 
 import core.FollowerConstants;
+import drivetrains.BaseDrivetrain;
 import feedforward.FeedforwardLut;
-import feedforward.holonomic.mecanum.MecanumProfileGenerator;
-import feedforward.holonomic.swerve.SwerveProfileGenerator;
+import feedforward.generators.MecanumProfileGenerator;
+import feedforward.generators.SwerveProfileGenerator;
 import geometry.Angle;
 import geometry.ArcPose;
 import geometry.BSpline;
@@ -18,205 +18,90 @@ import geometry.PathPoint;
 import geometry.PathSegment;
 import geometry.Pose;
 import geometry.Vector;
-import paths.callbacks.Callback;
-import paths.constraint.PathConstraint;
+import paths.Callback;
 import paths.heading.HeadingNode;
-import paths.heading.HolonomicInterpolationStyle;
+import paths.heading.InterpolationStyle;
 import paths.heading.HolonomicInterpolator;
 import paths.movements.Path;
 
 /**
  * A builder class designed to construct a {@link Path} fluently for holonomic drivetrains.
- * This class captures path configurations (waypoints, interpolators, callbacks)
- * in any order and defers geometric and kinematic compilation until a build method is called.
+ * This class captures path configurations (waypoints, interpolators, callbacks) in any order and
+ * defers geometric and kinematic compilation until a build method is called.
  *
- * @author DrPixelCat
+ * @author DrPixelCat - 7842 alum
  * @author Dylan B. - 18597 RoboClovers - Delta
- * @author
  */
-public class HolonomicPathBuilder {
+public class HolonomicPathBuilder extends PathBuilder<HolonomicPathBuilder> {
     private static final double EPSILON = 1e-6;
 
-    public Path path;
-    private final Pose[] rawPoses;
     private final Pose startPose;
     private final Pose expectedEndPose;
     private Dist blendWindow = null;
 
-    private HolonomicInterpolationStyle currentStyle =
-            HolonomicInterpolationStyle.SMOOTH_START_TO_END;
     private Angle customOffset = null;
     private Vector facingPoint = null;
-    private final Function<Double, Angle> customFunction = null;
 
-    private final List<Runnable> buildTasks = new ArrayList<>();
     private final List<HeadingNode> headingNodes = new ArrayList<>();
 
     /**
      * Creates a new HolonomicPathBuilder using the provided poses.
      *
-     * @param poses A sequence of Pose objects defining the path. Must contain at least two poses
-     *              . Endpoints cannot be ArcPoses.
+     * @param poses A sequence of Pose objects defining the path. Must contain at least two poses.
+     *              Endpoints cannot be ArcPoses.
      */
     public HolonomicPathBuilder(Pose... poses) {
-        this.path = new Path(Path.PathType.HOLONOMIC);
-        if (poses.length < 2) {
-            throw new IllegalArgumentException("A B-Spline must be created with > 1 points!");
-        }
-        if (poses[0] instanceof ArcPose || poses[poses.length - 1] instanceof ArcPose) {
-            throw new IllegalArgumentException("Endpoints can't be arcs!");
-        }
-        this.rawPoses = poses;
+        super(Path.PathType.HOLONOMIC, poses);
+
         this.startPose = poses[0];
         this.expectedEndPose = poses[poses.length - 1];
     }
 
-    /**
-     * Overrides the default (SMOOTH_START_TO_END) interpolation with a different
-     * {@link HolonomicInterpolationStyle}.
-     *
-     * @param style The interpolation style to apply.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
-    public HolonomicPathBuilder interpolateWith(HolonomicInterpolationStyle style) {
-        this.currentStyle = style;
+    @Override
+    public HolonomicPathBuilder interpolateWith(InterpolationStyle style) {
+        this.style = style;
         return this;
     }
 
-    /**
-     * Overrides the interpolation style, providing a custom angular offset.
-     * Used primarily for {@link HolonomicInterpolationStyle#TANGENT_CUSTOM}.
-     *
-     * @param style       The interpolation style to apply.
-     * @param angleOffset The fixed angle to offset the calculation by.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
-    public HolonomicPathBuilder interpolateWith(HolonomicInterpolationStyle style,
-                                                Angle angleOffset) {
-        this.currentStyle = style;
+    @Override
+    public HolonomicPathBuilder interpolateWith(InterpolationStyle style, Angle angleOffset) {
+        this.style = style;
         this.customOffset = angleOffset;
         return this;
     }
 
-    /**
-     * Overrides the interpolation style, providing a fixed field point to face.
-     * Used primarily for {@link HolonomicInterpolationStyle#FACING_POINT}.
-     *
-     * @param style       The interpolation style to apply.
-     * @param pointToFace The field coordinate the robot should face.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
-    public HolonomicPathBuilder interpolateWith(HolonomicInterpolationStyle style,
-                                                Vector pointToFace) {
+    @Override
+    public HolonomicPathBuilder interpolateWith(InterpolationStyle style, Vector pointToFace) {
         return interpolateWith(style, pointToFace, Angle.zero());
     }
 
-    /**
-     * Overrides the interpolation style, providing a fixed field point and angular offset.
-     * Used primarily for {@link HolonomicInterpolationStyle#FACING_POINT}.
-     *
-     * @param style       The interpolation style to apply.
-     * @param pointToFace The field coordinate the robot should face.
-     * @param angleOffset The fixed angle to offset the facing direction by.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
-    public HolonomicPathBuilder interpolateWith(HolonomicInterpolationStyle style,
-                                                Vector pointToFace,
+    @Override
+    public HolonomicPathBuilder interpolateWith(InterpolationStyle style, Vector pointToFace,
                                                 Angle angleOffset) {
-        this.currentStyle = style;
+        this.style = style;
         this.facingPoint = pointToFace != null ? pointToFace.copy() : null;
         this.customOffset = angleOffset != null ? angleOffset : Angle.zero();
         return this;
     }
 
-    /**
-     * Points the robot at a fixed field coordinate for the full path.
-     *
-     * @param pointToFace The field coordinate the robot should face.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
-    public HolonomicPathBuilder facePoint(Vector pointToFace) {
-        return facePoint(pointToFace, Angle.zero());
-    }
-
-    /**
-     * Points the robot at a fixed field coordinate for the full path with a heading offset.
-     *
-     * @param pointToFace The field coordinate the robot should face.
-     * @param angleOffset The fixed angle to offset the facing direction by.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
-    public HolonomicPathBuilder facePoint(Vector pointToFace, Angle angleOffset) {
-        return interpolateWith(HolonomicInterpolationStyle.FACING_POINT, pointToFace, angleOffset);
-    }
-
-    /**
-     * Adds a heading node for NODE_BASED interpolation.
-     * Automatically sets the interpolation style to NODE_BASED.
-     *
-     * @param pct    The distance percentage [0.0, 1.0].
-     * @param target The target Angle at this point.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
+    @Override
     public HolonomicPathBuilder addHeadingNode(double pct, Angle target) {
-        this.currentStyle = HolonomicInterpolationStyle.NODE_BASED;
+        this.style = InterpolationStyle.NODE_BASED;
         this.headingNodes.add(new HeadingNode(pct, target));
         return this;
     }
 
-    /**
-     * Sets how far from the end of the path the robot should start rotating to face its final
-     * target direction.
-     *
-     * @param distanceFromEnd The distance away from the end of the path.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
+    @Override
     public HolonomicPathBuilder setDistanceToStartFinalTurn(Dist distanceFromEnd) {
         this.blendWindow = distanceFromEnd;
         return this;
     }
 
-    /**
-     * Adds a kinematic constraint to the path at a specific distance percentage from 0 to 1.
-     * <p>
-     * NOTE: Only velocity can be limited on a quickBuild
-     * </p>
-     *
-     * @param constraint The {@link PathConstraint} to apply
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
-    public HolonomicPathBuilder addConstraint(PathConstraint constraint) {
-        if (constraint.getS() >= 1.0 || constraint.getS() < 0.0) {
-            constraint.setS(Math.min(Math.max(constraint.getS(), 0.0), 0.9));
-            path.addWarning("s must be within [0, 1] bounds! Normalized to " + constraint.getS() + " for safety.");
-        }
-        path.addConstraint(constraint);
-        return this;
-    }
-
-    /**
-     * Attaches an executable callback based on the physical distance percentage.
-     *
-     * @param s      The physical distance percentage [0.0, 1.0].
-     * @param action The code to execute.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
-    public HolonomicPathBuilder addDistanceCallback(double s, Runnable action) {
-        buildTasks.add(() -> path.addCallback(new Callback(s, action)));
-        return this;
-    }
-
-    /**
-     * Attaches an executable callback based on the robot reaching a target heading.
-     *
-     * @param angle  The Angle at which the callback should trigger.
-     * @param action The code to execute.
-     * @return The current HolonomicPathBuilder instance for method chaining.
-     */
+    @Override
     public HolonomicPathBuilder addAngularCallback(Angle angle, Runnable action) {
         buildTasks.add(() -> {
-            if (currentStyle == HolonomicInterpolationStyle.SMOOTH_START_TO_END) {
-                Angle startRad = rawPoses[0].getHeading();
+            if (style == InterpolationStyle.SMOOTH_START_TO_END) {
+                Angle startRad = startPose.getHeading();
                 Angle endRad = expectedEndPose.getHeading();
 
                 if (Double.isFinite(startRad.getRad()) && Double.isFinite(endRad.getRad())) {
@@ -228,7 +113,8 @@ public class HolonomicPathBuilder {
                             throw new IllegalArgumentException("Angular callback out of bounds: " +
                                     "The path's target heading is constant.");
                         }
-                    } else if ((totalDiff * targetDiff < 0) || (Math.abs(targetDiff) > Math.abs(totalDiff))) {
+                    } else if ((totalDiff * targetDiff < 0) ||
+                            (Math.abs(targetDiff) > Math.abs(totalDiff))) {
                         throw new IllegalArgumentException("Angular callback is outside the sweep" +
                                 " range of the start and end headings.");
                     }
@@ -239,18 +125,12 @@ public class HolonomicPathBuilder {
         return this;
     }
 
-    private boolean isFinite(Vector vector) {
-        return vector != null &&
-                Double.isFinite(vector.getX().getIn()) &&
-                Double.isFinite(vector.getY().getIn());
-    }
-
     private CubicSpline1D buildHeadingSpline(List<HeadingNode> nodes, String interpolationName) {
         Collections.sort(nodes);
 
         if (nodes.size() < 2) {
-            throw new IllegalStateException(interpolationName + " interpolation requires at least " +
-                    "a start and end heading.");
+            throw new IllegalStateException(interpolationName + " interpolation requires at least" +
+                    " a start and end heading.");
         }
 
         double[] x = new double[nodes.size()];
@@ -305,7 +185,7 @@ public class HolonomicPathBuilder {
         Angle offset = angleOffset != null ? angleOffset : Angle.zero();
 
         for (PathPoint sample : samples) {
-            double pct = 1.0 - (sample.getDistanceToEnd_in() / pathLength);
+            double pct = 1.0 - (sample.getDistanceToEndIn() / pathLength);
             Vector toPoint = pointToFace.minus(sample.getLocation());
             Angle heading = null;
             if (toPoint.getMag().getIn() > EPSILON) {
@@ -360,9 +240,9 @@ public class HolonomicPathBuilder {
             Pose currentPose = rawPoses[i];
 
             if (!intermediateWarningSent && Double.isFinite(currentPose.getHeading().getRad())) {
-                String headingSource = currentStyle == HolonomicInterpolationStyle.FACING_POINT ?
+                String headingSource = style == InterpolationStyle.FACING_POINT ?
                         "FACING_POINT derives headings from the point to face." :
-                        "Only the final pose heading controls the end heading.";
+                        "Only the final factory heading controls the end heading.";
                 path.addWarning("APEX WARNING: Intermediate B-Spline headings are currently " +
                         "ignored! " + headingSource);
                 intermediateWarningSent = true;
@@ -417,23 +297,24 @@ public class HolonomicPathBuilder {
 
         CubicSpline1D spline = null;
         boolean missingParams =
-                (currentStyle == HolonomicInterpolationStyle.CONSTANT_START_HEADING && !Double.isFinite(startH.getRad())) ||
-                        (currentStyle == HolonomicInterpolationStyle.CONSTANT_END_HEADING && !Double.isFinite(endH.getRad())) ||
-                        (currentStyle == HolonomicInterpolationStyle.TANGENT_CUSTOM && (customOffset == null || !Double.isFinite(customOffset.getRad()))) ||
-                        (currentStyle == HolonomicInterpolationStyle.FACING_POINT &&
-                                (!isFinite(facingPoint) ||
-                                        (customOffset != null && !Double.isFinite(customOffset.getRad())))) ||
-                        (currentStyle == HolonomicInterpolationStyle.SMOOTH_START_TO_END && (!Double.isFinite(startH.getRad()) || !Double.isFinite(endH.getRad())));
+                (style == InterpolationStyle.CONSTANT_START_HEADING && !startH.isFinite() ||
+                        (style == InterpolationStyle.CONSTANT_END_HEADING && !endH.isFinite()) ||
+                        (style == InterpolationStyle.TANGENT_CUSTOM &&
+                                (customOffset == null || !customOffset.isFinite())) ||
+                        (style == InterpolationStyle.FACING_POINT && (!facingPoint.isFinite() ||
+                                (customOffset != null && !customOffset.isFinite())))) ||
+                        (style == InterpolationStyle.SMOOTH_START_TO_END && (!startH.isFinite() ||
+                                !endH.isFinite()));
 
         if (missingParams) {
-            path.addWarning("APEX WARNING: " + currentStyle.name() + " is missing required " +
+            path.addWarning("APEX WARNING: " + style.name() + " is missing required " +
                     "parameters! Falling back to TANGENT_FORWARD.");
-            currentStyle = HolonomicInterpolationStyle.TANGENT_FORWARD;
+            style = InterpolationStyle.TANGENT_FORWARD;
         }
 
-        if (currentStyle == HolonomicInterpolationStyle.TANGENT_OPTIMAL) {
+        if (style == InterpolationStyle.TANGENT_OPTIMAL) {
             if (!Double.isFinite(startH.getRad())) {
-                currentStyle = HolonomicInterpolationStyle.TANGENT_FORWARD;
+                style = InterpolationStyle.TANGENT_FORWARD;
             } else {
                 // Resolve once here so the runtime interpolator only handles concrete headings.
                 Vector startTangent = curve.getFirstDerivative(0.0);
@@ -443,15 +324,15 @@ public class HolonomicPathBuilder {
                         Math.abs(startH.getShortestAngleTo(
                                 startTangent.getTheta().plus(Angle.fromRad(Math.PI))).getRad());
                 if (bwdError < fwdError) {
-                    currentStyle = HolonomicInterpolationStyle.TANGENT_CUSTOM;
+                    style = InterpolationStyle.TANGENT_CUSTOM;
                     customOffset = Angle.fromRad(Math.PI);
                 } else {
-                    currentStyle = HolonomicInterpolationStyle.TANGENT_FORWARD;
+                    style = InterpolationStyle.TANGENT_FORWARD;
                 }
             }
         }
 
-        if (currentStyle == HolonomicInterpolationStyle.NODE_BASED) {
+        if (style == InterpolationStyle.NODE_BASED) {
             ArrayList<HeadingNode> nodes = new ArrayList<>(headingNodes);
 
             // Automatically inject path boundary headings if the user didn't explicitly define them
@@ -470,13 +351,13 @@ public class HolonomicPathBuilder {
             }
 
             spline = buildHeadingSpline(nodes, "NODE_BASED");
-        } else if (currentStyle == HolonomicInterpolationStyle.FACING_POINT) {
+        } else if (style == InterpolationStyle.FACING_POINT) {
             Angle facingOffset = customOffset != null ? customOffset : Angle.zero();
             List<HeadingNode> facingNodes = buildFacingPointNodes(curve, facingPoint, facingOffset);
             spline = buildHeadingSpline(facingNodes, "FACING_POINT");
         }
 
-        HolonomicInterpolator interpolator = new HolonomicInterpolator(currentStyle, startH, endH
+        HolonomicInterpolator interpolator = new HolonomicInterpolator(style, startH, endH
                 , customOffset, spline);
         interpolator.setPathLength(curve.getLengthIn());
         if (blendWindow != null) {
@@ -490,33 +371,23 @@ public class HolonomicPathBuilder {
         }
     }
 
-    /**
-     * Builds the path geometry without generating a physical motion profile.
-     * The follower will automatically use dynamic velocity-bounded feedback.
-     *
-     * @return The constructed Path.
-     */
+    @Override
     public Path quickBuild() {
         compileGeometry();
         path.setFeedforwardLut(null);
         return path;
     }
 
-    /**
-     * Builds the path geometry and solves a complete kinematically constrained feedforward
-     * motion profile.
-     *
-     * @return The constructed Path with an attached FeedforwardLut.
-     */
+    @Override
     public Path profiledBuild() {
         compileGeometry();
-        FollowerConstants config = new FollowerConstants();
+        FollowerConstants constants = FollowerConstants.getInstance();
 
-        if (config.drivetrainType == FollowerConstants.DrivetrainType.COAXIAL_SWERVE) {
-            SwerveProfileGenerator generator = new SwerveProfileGenerator(config, path);
+        if (constants.drivetrainType == BaseDrivetrain.DrivetrainType.COAXIAL_SWERVE) {
+            SwerveProfileGenerator generator = new SwerveProfileGenerator(constants, path);
             path.setFeedforwardLut(new FeedforwardLut(generator.generate()));
         } else {
-            MecanumProfileGenerator generator = new MecanumProfileGenerator(config, path);
+            MecanumProfileGenerator generator = new MecanumProfileGenerator(constants, path);
             path.setFeedforwardLut(new FeedforwardLut(generator.generate()));
         }
 

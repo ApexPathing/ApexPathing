@@ -5,22 +5,26 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import core.FollowerConstants;
-import feedforward.angular.TurnProfileGenerator;
+import feedforward.generators.TurnProfileGenerator;
 import geometry.Angle;
 import geometry.Pose;
-import paths.callbacks.Callback;
+import paths.Callback;
 import paths.movements.Turn;
 
 /**
  * A builder class designed to construct a {@link Turn} fluently.
+ *
  * <p>
  * This handles stationary point-turns, allowing users to inject mechanical
  * callbacks at specific angles during the rotation.
+ * </p>
+ *
+ * @author DrPixelCat
  */
 public class TurnBuilder {
     private final Pose startPose;
     private Angle targetHeading = null;
-    private final FollowerConstants config;
+    private final FollowerConstants constants;
 
     private double angularVelLimitRad;
     private double angularAccelLimitRad;
@@ -34,9 +38,9 @@ public class TurnBuilder {
      */
     public TurnBuilder(Pose startPose) {
         this.startPose = startPose;
-        this.config = new FollowerConstants();
-        this.angularVelLimitRad = config.angularVelocityLimit.getRad();
-        this.angularAccelLimitRad = config.angularAccelerationLimit.getRad();
+        this.constants = FollowerConstants.getInstance();
+        this.angularVelLimitRad = constants.angularVelLimitRad;
+        this.angularAccelLimitRad = constants.angularAccelLimitRad;
     }
 
     /**
@@ -89,7 +93,7 @@ public class TurnBuilder {
      * @return The current TurnBuilder instance for method chaining.
      */
     public TurnBuilder setAngularVelocityLimit(Angle limit) {
-        if (limit.getRad() > config.angularVelocityLimit.getRad()) {
+        if (limit.getRad() > constants.angularVelLimitRad) {
             throw new IllegalStateException("The angular velocity limit must be <= the " +
                     "drivetrain's max angular velocity constraint!");
         }
@@ -104,7 +108,7 @@ public class TurnBuilder {
      * @return The current TurnBuilder instance for method chaining.
      */
     public TurnBuilder setAngularAccelerationLimit(Angle limit) {
-        if (limit.getRad() > config.angularAccelerationLimit.getRad()) {
+        if (limit.getRad() > constants.angularAccelLimitRad) {
             throw new IllegalStateException("The angular acceleration limit must be <= the " +
                     "drivetrain's max angular acceleration constraint!");
         }
@@ -112,9 +116,7 @@ public class TurnBuilder {
         return this;
     }
 
-    /**
-     * Internal method to compile the turn and execute callback bounds checks.
-     */
+    /** Internal method to compile the turn and execute callback bounds checks. */
     private Turn compileTurn() {
         if (targetHeading == null) {
             throw new IllegalStateException("Cannot build Turn: No target heading was specified! " +
@@ -136,15 +138,12 @@ public class TurnBuilder {
      *
      * @return The fully constructed {@link Turn}.
      */
-    public Turn quickBuild() {
-        return compileTurn();
-    }
+    public Turn quickBuild() { return compileTurn(); }
 
     /**
      * Compiles the turn, verifies callback bounds, and returns the executable, profiled Turn
-     * movement.
-     * RECOMMENDED: Use .quickBuild() instead for faster turns and generation time. Profiles are
-     * not needed as much for {@link Turn} movements so much as Path movements.
+     * movement. It is recommended to use .quickBuild() instead for faster turns and generation
+     * time. Profiles are not needed as much for {@link Turn} movements so much as Path movements.
      *
      * @return The fully constructed {@link Turn} with an attached feedforward profile.
      */
@@ -153,7 +152,8 @@ public class TurnBuilder {
 
         TurnProfileGenerator motionGen = new TurnProfileGenerator(
                 angularVelLimitRad,
-                angularAccelLimitRad
+                angularAccelLimitRad,
+                constants
         );
 
         // Ensure TurnProfileGenerator generates a compatible LUT for the Turn object

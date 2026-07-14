@@ -2,9 +2,9 @@ package geometry;
 
 /**
  * A generic class for matrix mathematics.
- * Author: DrPixelCat
  *
- * @author Sohum Arora 22985 Paraducks
+ * @author DrPixelCat - 7842 alum
+ * @author Sohum Arora - 22985 Paraducks
  */
 public class Matrix {
     private final double[][] data;
@@ -51,31 +51,7 @@ public class Matrix {
         return result;
     }
 
-    Matrix multiply(Matrix m) {
-        if (this.cols != m.rows) {
-            throw new IllegalArgumentException(
-                    "Cannot multiply: this matrix is " + this.getRows() + "x" + this.getCols() +
-                            " but other matrix is " + m.getRows() + "x" + m.getCols() +
-                            ". Inner dimensions must match."
-            );
-        }
-
-        double[][] result = new double[this.getRows()][m.getCols()];
-        for (int i = 0; i < this.getRows(); i++) {
-            for (int j = 0; j < m.getCols(); j++) {
-                double sum = 0.0;
-                for (int k = 0; k < this.getCols(); k++) {
-                    sum += this.data[i][k] * m.data[k][j];
-                }
-                result[i][j] = sum;
-            }
-        }
-        return new Matrix(result);
-    }
-
-    /**
-     * Get a value from the matrix.
-     */
+    /** Get a value from the matrix. */
     public double get(int row, int col) {
         if (row < 0 || row > rows || col < 0 || col > cols) {
             throw new IllegalArgumentException("Index out of bounds!");
@@ -83,11 +59,7 @@ public class Matrix {
         return data[row][col];
     }
 
-    public int getRows() {
-        return rows;
-    }
+    public int getRows() { return rows; }
 
-    public int getCols() {
-        return cols;
-    }
+    public int getCols() { return cols; }
 }

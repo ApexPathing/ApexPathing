@@ -3,36 +3,29 @@ package geometry;
 /**
  * Represents a purely mathematical, stateless 2D parametric curve.
  * Evaluated strictly using the parameter 't' in the domain [0.0, 1.0].
- * Author: DrPixelCat
+ *
+ * @author DrPixelCat - 7842 alum
  */
 public interface ParametricSegment {
 
-    /**
-     * @return The (x, y) coordinate at parameter t
-     */
+    /** @return The (x, y) coordinate at parameter t */
     Vector getPosition(double t);
 
-    /**
-     * @return The first derivative (velocity vector) at parameter t
-     */
+    /** @return The first derivative (velocity vector) at parameter t */
     Vector getFirstDerivative(double t);
 
-    /**
-     * @return The second derivative (acceleration vector) at parameter t
-     */
+    /** @return The second derivative (acceleration vector) at parameter t */
     Vector getSecondDerivative(double t);
 
-    /**
-     * @return The normalized tangent vector (forward direction) at parameter t.
-     */
+    /** @return The normalized tangent vector (forward direction) at parameter t. */
     default Vector getTangentVector(double t) {
         Vector d1 = getFirstDerivative(t);
         return d1.normalize(); // handles zero magnitude
     }
 
     /**
-     * @return The normalized normal vector (perpendicular to tangent) at parameter t.
-     * Used for calculating centripetal force and curvature vectors.
+     * @return The normalized normal vector (perpendicular to tangent) at parameter t. Used for
+     *         calculating centripetal force and curvature vectors.
      */
     default Vector getNormalVector(double t) {
         // Rotating the tangent by 90 degrees (PI/2 radians) yields the normal

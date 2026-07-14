@@ -2,6 +2,12 @@ package paths.constraint;
 
 import geometry.Dist;
 
+/**
+ * A constraint that applies to the robot's translational movement along a path, such as
+ * translational velocity or translational acceleration.
+ *
+ * @author DrPixelCat - 7842 alum
+ */
 public class TranslationalConstraint implements PathConstraint {
     private double s;
     private final ConstraintType type;
@@ -14,21 +20,13 @@ public class TranslationalConstraint implements PathConstraint {
     }
 
     @Override
-    public double getS() {
-        return s;
-    }
+    public double getS() { return s; }
 
     @Override
-    public void setS(double s) {
-        this.s = s;
-    }
+    public void setS(double s) { this.s = s; }
 
     @Override
-    public ConstraintType getType() {
-        return type;
-    }
+    public ConstraintType getType() { return type; }
 
-    public double getValueIn() {
-        return value_in;
-    }
+    public double getValueIn() { return value_in; }
 }

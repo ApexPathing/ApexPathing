@@ -3,41 +3,31 @@ package paths.movements;
 import geometry.Pose;
 
 /**
- * Abstract base class extended by {@link Path} and {@link Turn}
- * Used in order to track the robot's progression along a particular Path or a Turn, enabling the
- * implementation of robust FSMs in autonomous code
+ * Base class for {@link Path} and {@link Turn} movements.
  *
- * @author Sohum Arora 22985 Paraducks
+ * @author Sohum Arora - 22985 Paraducks
  */
 public abstract class FollowerMovement {
     private boolean started = false;
     private boolean ended = false;
 
     /**
-     * Gets the expected final pose of the robot after this movement is completed.
-     * This is critical for linking sequential builders together!
+     * Gets the expected final pose of the robot after this movement is completed. Generally, this
+     * is used to get the start pose of the next movement in a sequence.
      *
-     * @return The final Pose.
+     * @return the final Pose.
      */
     public abstract Pose getEndPose();
 
-    /**
-     * Below are methods to track a robot's progress along a given FollowerMovement, enabling the
-     * implementation of a robust FSM
-     */
-    public boolean hasStarted() {
-        return started;
-    }
+    public boolean hasStarted() { return started; }
 
-    public boolean hasEnded() {
-        return ended;
-    }
+    public boolean hasEnded() { return ended; }
 
-    public void setStarted(boolean started) {
-        this.started = started;
-    }
+    public void setStarted(boolean started) { this.started = started; }
 
-    public void setEnded(boolean ended) {
-        this.ended = ended;
-    }
+    public void setEnded(boolean ended) { this.ended = ended; }
+
+    public Path toPath() { return (Path) this; }
+
+    public Turn toTurn() { return (Turn) this; }
 }

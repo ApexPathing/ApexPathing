@@ -16,67 +16,72 @@ import java.util.Objects;
  * </p>
  *
  * @param <T> the type of drivetrain configuration this drivetrain uses, which must extend
- *            {@link BaseDrivetrainConfig}
+ *        {@link BaseDrivetrainConstants}
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
-public abstract class BaseDrivetrain<T extends BaseDrivetrainConfig<T>> {
-    protected T config;
+public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
+    protected T constants;
+
+    public enum DrivetrainType {
+        COAXIAL_SWERVE,
+        DUAL_ACTUATED,
+        KIWI,
+        MECANUM,
+        TANK
+    }
+
+    private final DrivetrainType drivetrainType;
+    private final boolean isHolonomic;
 
     // Note: front motors are guaranteed to be non-null, but rear motors may be null if not needed
     protected DcMotorEx flMotor, frMotor, blMotor, brMotor;
 
     // Power change deadzone to prevent unnecessary motor updates
     private static final double POWER_TOLERANCE = 0.005;
-    private double lastFlPower = 0;
-    private double lastFrPower = 0;
-    private double lastBlPower = 0;
-    private double lastBrPower = 0;
+    private double lastFlPower, lastFrPower, lastBlPower, lastBrPower = 0.0;
 
     /**
      * Your drivetrain class constructor should call this super constructor to initialize motors and
      * store the configuration.
      *
-     * @param config      your drivetrain configuration object that is a child of
-     *                    {@link BaseDrivetrainConfig}
+     * @param constants your drivetrain configuration object that is a child of {@link BaseDrivetrainConstants}
      * @param hardwareMap the hardware map to use for initializing motors
      */
-    public BaseDrivetrain(T config, HardwareMap hardwareMap) {
-        if (Objects.equals(config.flMotorConfig.getName(), "defaultMotorName")) {
-            throw new IllegalArgumentException("Front left motor configuration is not set in the " +
-                    "drivetrain config.");
+    public BaseDrivetrain(T constants, HardwareMap hardwareMap, DrivetrainType drivetrainType) {
+        if (Objects.equals(constants.flMotorConfig.getName(), "defaultMotorName")) {
+            throw new IllegalArgumentException("Front left motor configuration is not set in the drivetrain constants.");
         }
-        if (Objects.equals(config.frMotorConfig.getName(), "defaultMotorName")) {
-            throw new IllegalArgumentException("Front right motor configuration is not set in the" +
-                    " drivetrain config.");
+        if (Objects.equals(constants.frMotorConfig.getName(), "defaultMotorName")) {
+            throw new IllegalArgumentException("Front right motor configuration is not set in the drivetrain constants.");
         }
-        flMotor = config.flMotorConfig.build(hardwareMap);
-        frMotor = config.frMotorConfig.build(hardwareMap);
+        flMotor = constants.flMotorConfig.build(hardwareMap);
+        frMotor = constants.frMotorConfig.build(hardwareMap);
 
-        if (config.blMotorConfig != null) {
-            if (Objects.equals(config.blMotorConfig.getName(), "defaultMotorName")) {
-                throw new IllegalArgumentException("Back left motor configuration is not set in " +
-                        "the drivetrain config.");
+        if (constants.blMotorConfig != null) {
+            if (Objects.equals(constants.blMotorConfig.getName(), "defaultMotorName")) {
+                throw new IllegalArgumentException("Back left motor configuration is not set in the drivetrain constants.");
             }
-            blMotor = config.blMotorConfig.build(hardwareMap);
+            blMotor = constants.blMotorConfig.build(hardwareMap);
         }
-        if (config.brMotorConfig != null) {
-            if (Objects.equals(config.brMotorConfig.getName(), "defaultMotorName")) {
-                throw new IllegalArgumentException("Back right motor configuration is not set in " +
-                        "the drivetrain config.");
+        if (constants.brMotorConfig != null) {
+            if (Objects.equals(constants.brMotorConfig.getName(), "defaultMotorName")) {
+                throw new IllegalArgumentException("Back right motor configuration is not set in the drivetrain constants.");
             }
-            brMotor = config.brMotorConfig.build(hardwareMap);
+            brMotor = constants.brMotorConfig.build(hardwareMap);
         }
 
-        this.config = config;
+        this.constants = constants;
+        this.drivetrainType = drivetrainType;
+        this.isHolonomic = drivetrainType != DrivetrainType.TANK;
     }
 
     /**
      * Moves the robot using the provided drive, strafe, and turn vectors.
      * The values are normalized and applied to the motors according to the mecanum drive formulas.
      *
-     * @param x    the forward/backward movement vector (positive for forward, negative for
-     *             backward)
-     * @param y    the left/right movement vector (positive for left, negative for right)
+     * @param x the forward/backward movement vector (positive for forward, negative for
+     *          backward)
+     * @param y the left/right movement vector (positive for left, negative for right)
      * @param turn the rotation vector (positive for counterclockwise, negative for clockwise)
      */
     public abstract void moveWithVectors(double x, double y, double turn);
@@ -87,19 +92,16 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConfig<T>> {
      * parameter will be ignored, you can use the other drive method that doesn't require the
      * robot's heading.
      *
-     * @param x            the forward/backward joystick input (positive for forward, negative
-     *                     for backward)
-     * @param y            the left/right joystick input (positive for left, negative for right)
-     * @param turn         the rotation joystick input (positive for counterclockwise, negative
-     *                     for clockwise)
-     * @param robotHeading the current heading of the robot in radians, not used for robot
-     *                     centric control
+     * @param x forward/backward joystick input (positive for forward, negative for backward)
+     * @param y left/right joystick input (positive for left, negative for right)
+     * @param turn rotation joystick input (positive for counterclockwise, negative for clockwise)
+     * @param robotHeadingRad current heading of the robot in radians, only used for field centric
      */
-    public void drive(double x, double y, double turn, double robotHeading) {
+    public void drive(double x, double y, double turn, double robotHeadingRad) {
         double adjX, adjY;
-        if (!config.robotCentric) { // Field centric
-            double cos = Math.cos(-robotHeading);
-            double sin = Math.sin(-robotHeading);
+        if (!constants.robotCentric) { // Field centric
+            double cos = Math.cos(-robotHeadingRad);
+            double sin = Math.sin(-robotHeadingRad);
             adjX = x * cos - y * sin;
             adjY = x * sin + y * cos;
         } else {
@@ -114,17 +116,21 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConfig<T>> {
      * control. If you are using field-centric control, you have to use the other drive method that
      * requires the robot's current heading to be passed in as a parameter.
      *
-     * @param x    the forward/backward joystick input (positive for forward, negative for backward)
-     * @param y    the left/right joystick input (positive for left, negative for right)
-     * @param turn the rotation joystick input (positive for counterclockwise, negative for
-     *             clockwise)
+     * @param x forward/backward joystick input (positive for forward, negative for backward)
+     * @param y left/right joystick input (positive for left, negative for right)
+     * @param turn rotation joystick input (positive for counterclockwise, negative for clockwise)
      */
-    public void drive(double x, double y, double turn) {drive(x, y, turn, 0);}
+    public void drive(double x, double y, double turn) { drive(x, y, turn, 0); }
 
-    /**
-     * @return Whether the drivetrain is currently in a holonomic state or not
-     */
-    public abstract boolean isHolonomic();
+    /** @return the drivetrain type of this drivetrain */
+    public DrivetrainType getDrivetrainType() {
+        return drivetrainType;
+    }
+
+    /** @return Whether the drivetrain is currently in a holonomic state or not */
+    public boolean isHolonomic() {
+        return isHolonomic;
+    }
 
     /**
      * Sets the power for each drivetrain motor, applying limits from the configurations. If your
@@ -136,14 +142,12 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConfig<T>> {
         max = Math.max(max, Math.abs(frPower));
         if (blMotor != null) max = Math.max(max, Math.abs(blPower));
         if (brMotor != null) max = Math.max(max, Math.abs(brPower));
-        if (max > config.maxPower) {
-            flPower = (flPower / max) * config.maxPower;
-            frPower = (frPower / max) * config.maxPower;
-            if (blMotor != null) blPower = (blPower / max) * config.maxPower;
-            if (brMotor != null) brPower = (brPower / max) * config.maxPower;
+        if (max > constants.maxPower) {
+            flPower = (flPower / max) * constants.maxPower;
+            frPower = (frPower / max) * constants.maxPower;
+            if (blMotor != null) blPower = (blPower / max) * constants.maxPower;
+            if (brMotor != null) brPower = (brPower / max) * constants.maxPower;
         }
-
-        // TODO: Add velocity and acceleration limiting
 
         // Write to motors only if the change exceeds the tolerance
         if (Math.abs(flPower - lastFlPower) > POWER_TOLERANCE) {
@@ -167,6 +171,5 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConfig<T>> {
     /**
      * Stop all drivetrain actuators
      */
-    public void stop() {setPowers(0, 0, 0, 0);}
-
+    public void stop() { setPowers(0, 0, 0, 0); }
 }

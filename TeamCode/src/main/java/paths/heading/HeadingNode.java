@@ -2,6 +2,11 @@ package paths.heading;
 
 import geometry.Angle;
 
+/**
+ * Represents a heading target at a specific percentage of the path.
+ *
+ * @author DrPixelCat - 7842 alum
+ */
 public class HeadingNode implements Comparable<HeadingNode> {
     public final double pct;
     public final Angle target;
@@ -12,7 +17,5 @@ public class HeadingNode implements Comparable<HeadingNode> {
     }
 
     @Override
-    public int compareTo(HeadingNode other) {
-        return Double.compare(this.pct, other.pct);
-    }
+    public int compareTo(HeadingNode other) { return Double.compare(this.pct, other.pct); }
 }

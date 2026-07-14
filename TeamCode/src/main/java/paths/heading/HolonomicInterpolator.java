@@ -6,10 +6,11 @@ import geometry.Vector;
 
 /**
  * Calculates heading profiles allowing independent rotational control.
+ *
+ * @author DrPixelCat - 7842 alum
  */
 public class HolonomicInterpolator implements HeadingInterpolator {
-
-    private final HolonomicInterpolationStyle style;
+    private final InterpolationStyle style;
     private final Angle startHeading;
     private final Angle endHeading;
     private final Angle customOffset;
@@ -19,7 +20,7 @@ public class HolonomicInterpolator implements HeadingInterpolator {
     private final double DEFAULT_BLEND_WINDOW_IN = 15.0;
     private double blendWindow = DEFAULT_BLEND_WINDOW_IN;
 
-    public HolonomicInterpolator(HolonomicInterpolationStyle style, Angle startHeading,
+    public HolonomicInterpolator(InterpolationStyle style, Angle startHeading,
                                  Angle endHeading, Angle customOffset, CubicSpline1D spline) {
         this.style = style;
         this.startHeading = startHeading != null ? startHeading.copy() : null;
@@ -29,17 +30,13 @@ public class HolonomicInterpolator implements HeadingInterpolator {
     }
 
     @Override
-    public void setPathLength(double length) {
-        this.pathLength = Math.max(length, 1e-6);
-    }
+    public void setPathLength(double length) { this.pathLength = Math.max(length, 1e-6); }
 
-    public void setBlendWindow(double windowLengthInches) {
-        this.blendWindow = windowLengthInches;
-    }
+    public void setBlendWindow(double windowLengthInches) { this.blendWindow = windowLengthInches; }
 
     /**
-     * Calculates the blend parameter u (0.0 to 1.0) at the END of the path.
-     * s is distance remaining. When s > blendWindow, u = 0. When s = 0, u = 1.
+     * Calculates the blend parameter u (0.0 to 1.0) at the END of the path. s is distance
+     * remaining. When s > blendWindow, u = 0. When s = 0, u = 1.
      */
     private double getBlendU(double s) {
         if (blendWindow <= 1e-6 || s > blendWindow) return 0.0;
@@ -47,8 +44,8 @@ public class HolonomicInterpolator implements HeadingInterpolator {
     }
 
     private boolean usesHeadingSpline() {
-        return (style == HolonomicInterpolationStyle.NODE_BASED ||
-                style == HolonomicInterpolationStyle.FACING_POINT) && headingSpline != null;
+        return (style == InterpolationStyle.NODE_BASED ||
+                style == InterpolationStyle.FACING_POINT) && headingSpline != null;
     }
 
     private Angle getBaseHeadingAtEnd(Vector finalTangent) {
@@ -112,7 +109,7 @@ public class HolonomicInterpolator implements HeadingInterpolator {
 
         // Apply the 15-inch terminal blend if necessary
         double u = getBlendU(s);
-        if (u > 0.0 && style != HolonomicInterpolationStyle.SMOOTH_START_TO_END) {
+        if (u > 0.0 && style != InterpolationStyle.SMOOTH_START_TO_END) {
             double terminalError = getTerminalErrorRad(finalTangent);
             double blendSmoothU = (3.0 * u * u) - (2.0 * u * u * u);
             return Angle.fromRad(baseHeading.getRad() + (terminalError * blendSmoothU));
@@ -126,9 +123,9 @@ public class HolonomicInterpolator implements HeadingInterpolator {
         double basePrime = 0.0;
         double pctTraveled = (pathLength - s) / pathLength;
 
-        if (style == HolonomicInterpolationStyle.TANGENT_FORWARD || style == HolonomicInterpolationStyle.TANGENT_CUSTOM) {
+        if (style == InterpolationStyle.TANGENT_FORWARD || style == InterpolationStyle.TANGENT_CUSTOM) {
             basePrime = kappa;
-        } else if (style == HolonomicInterpolationStyle.SMOOTH_START_TO_END) {
+        } else if (style == InterpolationStyle.SMOOTH_START_TO_END) {
             // Chain rule: d(theta)/ds_traveled = d(theta)/d(pct) * (1 / pathLength)
             double diffRad = startHeading.getShortestAngleTo(endHeading).getRad();
             basePrime =
@@ -138,7 +135,7 @@ public class HolonomicInterpolator implements HeadingInterpolator {
         }
 
         double u = getBlendU(s);
-        if (u > 0.0 && style != HolonomicInterpolationStyle.SMOOTH_START_TO_END) {
+        if (u > 0.0 && style != InterpolationStyle.SMOOTH_START_TO_END) {
             double terminalError = getTerminalErrorRad(finalTangent);
             double dSmoothU = (6.0 * u - 6.0 * u * u) / blendWindow;
             return basePrime + (terminalError * dSmoothU);
@@ -152,9 +149,9 @@ public class HolonomicInterpolator implements HeadingInterpolator {
         double baseDoublePrime = 0.0;
         double pctTraveled = (pathLength - s) / pathLength;
 
-        if (style == HolonomicInterpolationStyle.TANGENT_FORWARD || style == HolonomicInterpolationStyle.TANGENT_CUSTOM) {
+        if (style == InterpolationStyle.TANGENT_FORWARD || style == InterpolationStyle.TANGENT_CUSTOM) {
             baseDoublePrime = dKappa;
-        } else if (style == HolonomicInterpolationStyle.SMOOTH_START_TO_END) {
+        } else if (style == InterpolationStyle.SMOOTH_START_TO_END) {
             // Chain rule: d2(theta)/ds_traveled2 = d2(theta)/d(pct)2 * (1 / pathLength)^2
             double diffRad = startHeading.getShortestAngleTo(endHeading).getRad();
             baseDoublePrime = diffRad * (6.0 - 12.0 * pctTraveled) / (pathLength * pathLength);
@@ -164,7 +161,7 @@ public class HolonomicInterpolator implements HeadingInterpolator {
         }
 
         double u = getBlendU(s);
-        if (u > 0.0 && style != HolonomicInterpolationStyle.SMOOTH_START_TO_END) {
+        if (u > 0.0 && style != InterpolationStyle.SMOOTH_START_TO_END) {
             double terminalError = getTerminalErrorRad(finalTangent);
             double d2SmoothU = (6.0 - 12.0 * u) / (blendWindow * blendWindow);
             return baseDoublePrime + (terminalError * d2SmoothU);

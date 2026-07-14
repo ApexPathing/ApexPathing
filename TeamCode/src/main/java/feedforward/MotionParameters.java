@@ -2,10 +2,14 @@ package feedforward;
 
 /**
  * One row of a feedforward trajectory lookup table.
+ *
  * <p>
  * The paper describes the path-relative kinematic state as {@code [v, a, omega, alpha]}:
  * tangential velocity, tangential acceleration, angular velocity, and angular acceleration.
  * This class stores that state, plus bookkeeping values used by the follower and generator.
+ * </p>
+ *
+ * @author DrPixelCat - 7842 alum
  */
 public class MotionParameters {
     /** Path-relative linear speed, in distance units per second. */
