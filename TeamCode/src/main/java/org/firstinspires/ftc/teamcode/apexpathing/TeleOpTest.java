@@ -14,6 +14,7 @@ import geometry.Pose;
  */
 @TeleOp(name = "Apex TeleOp Test", group = "Apex Pathing")
 public class TeleOpTest extends LinearOpMode {
+    public double loops = 0, lastLoop = 0, loopTime = 0;
     Constants constants = new Constants();
 
     @Override
@@ -36,6 +37,16 @@ public class TeleOpTest extends LinearOpMode {
                 follower.manual(gamepad1);
             }
 
+            loops++;
+
+            if (loops > 15) {
+                double now = System.currentTimeMillis();
+                loopTime = (now - lastLoop) / loops;
+                lastLoop = now;
+                loops = 0;
+            }
+
+            telemetry.addData("Loop time (ms)", loopTime);
             telemetry.addData("X", currentPose.getX());
             telemetry.addData("Y ", currentPose.getY());
             telemetry.addData("Heading", currentPose.getHeading());
