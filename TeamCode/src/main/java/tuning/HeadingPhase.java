@@ -25,7 +25,7 @@ public class HeadingPhase extends TuningPhase {
     public HeadingPhase(TunerContext context) {
         super(context);
 
-        routine = new PDSRoutine(context, PDSRoutine.TuningAxis.HEADING);
+        routine = new PDSRoutine(context, PDSRoutine.Axis.HEADING);
         testTurn = () -> new TurnBuilder(context.getFollower().getPose())
                 .turnTo(Angle.fromDeg(target))
                 .quickBuild();

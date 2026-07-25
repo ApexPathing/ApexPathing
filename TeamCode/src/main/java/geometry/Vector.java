@@ -9,7 +9,7 @@ import androidx.annotation.NonNull;
  *
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
-public final class Vector {
+public class Vector {
     private final Dist x;
     private final Dist y;
 
@@ -57,9 +57,7 @@ public final class Vector {
     public Dist getMag() { return x.hypot(y); }
 
     /** @return the magnitude squared of this Vector from the origin */
-    public Dist getMagSq() {
-        return Dist.fromIn(x.getIn() * x.getIn() + y.getIn() * y.getIn());
-    }
+    public Dist getMagSq() { return Dist.fromIn(x.getIn() * x.getIn() + y.getIn() * y.getIn()); }
 
     /** @return the theta of this vector relative to the positive X-axis. */
     public Angle getTheta() { return Angle.fromRad(Math.atan2(y.getIn(), x.getIn())); }
@@ -133,9 +131,7 @@ public final class Vector {
     public Vector mirrorY() { return new Vector(this.x.mirror(), this.y); }
 
     /** @return a Vector that is the reflection of this Vector across another Vector */
-    public Vector reflect(Vector across) {
-        return across.plus(this.minus(across).times(-1.0));
-    }
+    public Vector reflect(Vector across) { return across.plus(this.minus(across).times(-1.0)); }
 
     /** @return a copy of this Vector */
     public Vector copy() { return new Vector(this.x.copy(), this.y.copy()); }
@@ -147,8 +143,8 @@ public final class Vector {
 
     @Override
     public boolean equals(Object obj) {
-        if (this == obj) return true;
-        if (obj == null || getClass() != obj.getClass()) return false;
+        if (this == obj) { return true; }
+        if (obj == null || getClass() != obj.getClass()) { return false; }
         Vector other = (Vector) obj;
         return this.x.equals(other.x) && this.y.equals(other.y);
     }

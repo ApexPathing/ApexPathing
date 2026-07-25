@@ -20,11 +20,13 @@ import controllers.PDSController.PDSCoefficients;
  * @author DrPixelCat - 7842 alum
  */
 public class FollowerConstants {
+    /**
+     * Note to developers:
+     * If you want to add new constants, create the variable here and add it to the loadValues() and
+     * toJson() methods. This will ensure that the new constants are loaded from the JSON file and
+     * saved back to it.
+     */
     private static FollowerConstants instance;
-    /* Note to developers:
-    If you want to add new constants, create the variable here and add it to the loadValues() and
-    toJson() methods. This will ensure that the new constants are loaded from the JSON file and
-    saved back to it. */
     public BaseDrivetrain.DrivetrainType drivetrainType =
             BaseDrivetrain.DrivetrainType.MECANUM;
     public PDSCoefficients headingCoeffs = new PDSCoefficients();
@@ -61,18 +63,19 @@ public class FollowerConstants {
     }
 
     public void reload() {
-        File file = new File(
-                Environment.getExternalStorageDirectory().getPath() +
-                        "/FIRST/ApexPathing/constants.json"
-        );
-        if (!file.exists()) return;
+        File file = new File(Environment.getExternalStorageDirectory().getPath() +
+                "/FIRST/ApexPathing/constants.json");
+        if (!file.exists()) { return; }
 
         JSONObject json;
         try {
             BufferedReader reader = new BufferedReader(new FileReader(file));
             StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) sb.append(line);
+            String line = reader.readLine();
+            while (line != null) {
+                sb.append(line);
+                line = reader.readLine();
+            }
             reader.close();
             json = new JSONObject(sb.toString());
         } catch (Exception e) {

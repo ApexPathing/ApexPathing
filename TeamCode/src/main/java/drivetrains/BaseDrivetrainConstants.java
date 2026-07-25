@@ -8,35 +8,24 @@ import geometry.Dist;
 /**
  * Abstract class implemented by all drivetrain configuration classes
  *
- * <p>
- * When creating a drivetrain configuration, you must extend this class and implement the build()
+ * <p>When creating a drivetrain configuration, you must extend this class and implement the build()
  * method to return an instance of the corresponding drivetrain class using your configuration
- * class.
- * Your constants should have a public scope and be initialized with default values.
- * </p>
+ * class. Your constants should have a public scope and be initialized with default values.
  *
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
 public abstract class BaseDrivetrainConstants<T extends BaseDrivetrainConstants<T>> {
-    // Motors (only 2 motors are guaranteed, others are optional and may be null)
-    // Child classes should handle setting these up as needed
-    public Motor flMotorConfig = new Motor();
-    public Motor frMotorConfig = new Motor();
-    public Motor blMotorConfig = null;
-    public Motor brMotorConfig = null;
+    /** Child classes should handle setting these up as needed. */
+    public Motor flMotorConfig, frMotorConfig, blMotorConfig, brMotorConfig;
 
     public double maxPower = 1.0;
     public Angle headingTolerance = Angle.fromDeg(1.0);
     public Dist distanceTolerance = Dist.fromIn(0.5);
 
-    // Other constants
-    public boolean robotCentric = true; // Robot or field centric control
+    public boolean robotCentric = true; // Robot/field centric
 
-    /**
-     * Builds and returns an instance of the corresponding drivetrain class using this
-     * configuration.
-     */
-    public abstract BaseDrivetrain<?> build(HardwareMap hardwareMap);
+    /** Builds and returns an instance of the corresponding drivetrain class using this config. */
+    public abstract BaseDrivetrain<T> build(HardwareMap hardwareMap);
 
     /** Set the maximum motor output limit for the drivetrain. The default is 1.0. */
     @SuppressWarnings("unchecked")
@@ -74,24 +63,4 @@ public abstract class BaseDrivetrainConstants<T extends BaseDrivetrainConstants<
         this.distanceTolerance = distanceTolerance;
         return (T) this;
     }
-
-    /**
-     * Get the motor configuration for the front left motor.
-     */
-    public Motor getFlMotorConfig() { return flMotorConfig; }
-
-    /**
-     * Get the motor configuration for the front right motor.
-     */
-    public Motor getFrMotorConfig() { return frMotorConfig; }
-
-    /**
-     * Get the motor configuration for the back left motor. May be null if not set.
-     */
-    public Motor getBlMotorConfig() { return blMotorConfig; }
-
-    /**
-     * Get the motor configuration for the back right motor. May be null if not set.
-     */
-    public Motor getBrMotorConfig() { return brMotorConfig; }
 }

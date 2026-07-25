@@ -25,24 +25,21 @@ import tuning.VelocityFeedbackPhase;
  */
 @TeleOp(name = "Follower Tuner", group = "Apex Pathing")
 public class FollowerTuner extends LinearOpMode {
-    // Completion is determined by whether the last saved value of the phase's constants is non-zero
-    // Tuners are ran in the order of the enum ordinals
+    /**
+     * Completion is determined by whether the last saved value of the phase's constants is non-zero
+     * Tuners are ran in the order of the enum ordinals
+     */
     enum Phase {
-        HEADING(HeadingPhase.class, (FollowerConstants constants) -> (
-                constants.headingCoeffs.kP != 0.0
-        )),
-        LIMITS(LimitsPhase.class, (FollowerConstants constants) -> (
-                constants.translationalCoeffs.kP != 0.0
-        )),
-        DRIVE(DrivePhase.class, (FollowerConstants constants) -> (
-                constants.translationalCoeffs.kP != 0.0
-        )),
-        CENTRIPETAL(CentripetalPhase.class, (FollowerConstants constants) -> (
-                constants.kCentripetal != 0.0
-        )),
-        VELOCITY_FEEDBACK(VelocityFeedbackPhase.class, (FollowerConstants constants) -> (
-                constants.angularVelocityFeedbackGain != 0.0
-        ));
+        HEADING(HeadingPhase.class, (FollowerConstants constants) ->
+                constants.headingCoeffs.kP != 0.0),
+        LIMITS(LimitsPhase.class, (FollowerConstants constants) ->
+                constants.translationalCoeffs.kP != 0.0),
+        DRIVE(DrivePhase.class, (FollowerConstants constants) ->
+                constants.translationalCoeffs.kP != 0.0),
+        CENTRIPETAL(CentripetalPhase.class, (FollowerConstants constants) ->
+                constants.kCentripetal != 0.0),
+        VELOCITY_FEEDBACK(VelocityFeedbackPhase.class, (FollowerConstants constants) ->
+                constants.angularVelocityFeedbackGain != 0.0);
 
         final Class<? extends TuningPhase> phaseClass;
         final Predicate<FollowerConstants> isTunedPredicate;
@@ -73,14 +70,10 @@ public class FollowerTuner extends LinearOpMode {
         context.setFollower(new Follower(new Constants(), hardwareMap, true));
         context.constants.drivetrainType = context.getFollower().getDrivetrain().getDrivetrainType();
         
-        for (Phase phase : phases) {
-            phase.updateTunedStatus(context.constants);
-        }
+        for (Phase phase : phases) { phase.updateTunedStatus(context.constants); }
         selectFirstIncompletePhase();
 
-        while (opModeInInit() && !isPhaseSelected) {
-            isPhaseSelected = phaseSelector();
-        }
+        while (opModeInInit() && !isPhaseSelected) { isPhaseSelected = phaseSelector(); }
 
         telemetry.addLine("Press Start to run the tuner.");
         telemetry.addLine("Make sure the robot has enough space.");
@@ -110,9 +103,7 @@ public class FollowerTuner extends LinearOpMode {
     }
 
     private String phaseStatus(Phase phase) {
-        if (phase.tuned) {
-            return "[ ✓ ]";
-        }
+        if (phase.tuned) { return "[ ✓ ]"; }
         return phaseAvailable(phase) ? "[   ]" : "[ X ]";
     }
 
@@ -140,11 +131,11 @@ public class FollowerTuner extends LinearOpMode {
 
         if (gamepad1.dpadUpWasPressed()) {
             do {
-                selectedPhaseOrdinal = (phases[(selectedPhaseOrdinal.ordinal() - 1) % phaseAmount]);
+                selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() - 1) % phaseAmount];
             } while (!phaseAvailable(selectedPhaseOrdinal));
         } else if (gamepad1.dpadDownWasPressed()) {
             do {
-                selectedPhaseOrdinal = (phases[(selectedPhaseOrdinal.ordinal() + 1) % phaseAmount]);
+                selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() + 1) % phaseAmount];
             } while (!phaseAvailable(selectedPhaseOrdinal));
         } else if (gamepad1.bWasPressed()) {
             try {

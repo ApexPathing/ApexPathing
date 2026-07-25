@@ -8,6 +8,7 @@ import geometry.Pose;
  * @author Sohum Arora - 22985 Paraducks
  */
 public abstract class FollowerMovement {
+    protected Pose endPose;
     private boolean started = false;
     private boolean ended = false;
 
@@ -17,7 +18,7 @@ public abstract class FollowerMovement {
      *
      * @return the final Pose.
      */
-    public abstract Pose getEndPose();
+    public Pose getEndPose() { return endPose; }
 
     public boolean hasStarted() { return started; }
 

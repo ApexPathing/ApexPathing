@@ -3,30 +3,47 @@ package geometry;
 /**
  * Represents a Uniform Cubic B-Spline.
  *
- * <p>
- * B-Splines guarantee C2 continuity (smooth position, velocity, and acceleration)
- * across the entire path. Because they are evaluated using a sliding 4-point window,
- * calculating a point on the curve runs in O(1) constant time, regardless of how
- * many control points are in the path.
- * </p>
+ * <p>B-Splines guarantee C2 continuity (smooth position, velocity, and acceleration) across the
+ * entire path. Because they are evaluated using a sliding 4-point window, calculating a point on
+ * the curve runs in O(1) constant time, regardless of how many control points are in the path.
  *
  * @author DrPixelCat - 7842 alum
  * @author Sohum Arora - 22895 Paraducks
+ * @author Dylan B. - 18597 RoboClovers - Delta
  */
 public class BSpline implements ParametricSegment {
-    private final int numSegments;
-
-    // Cached polynomial coefficients for each segment
-    // cx[segmentIndex] returns the [c3, c2, c1, c0] array for that segment
-    private final double[][] cx;
-    private final double[][] cy;
-
+    @SuppressWarnings({"ArrayCreationWithoutNewKeyword", "ConstantExpression"})
     private static final Matrix BLEND_MATRIX = new Matrix(new double[][]{
             {-1.0 / 6.0, 3.0 / 6.0, -3.0 / 6.0, 1.0 / 6.0},
             {3.0 / 6.0, -6.0 / 6.0, 3.0 / 6.0, 0.0},
             {-3.0 / 6.0, 0.0, 3.0 / 6.0, 0.0},
             {1.0 / 6.0, 4.0 / 6.0, 1.0 / 6.0, 0.0}
     });
+
+    /**
+     * Cached polynomial coefficients for each segment. cx[segmentIndex] returns the
+     * [c3, c2, c1, c0] array for that segment
+     */
+    private final double[][] cx;
+    private final double[][] cy;
+    private final int numSegments;
+
+    private SegmentData cachedSegment;
+
+    /** Bundles the normalized parameter, local segment parameter, and precomputed coefficients. */
+    private static class SegmentData {
+        final double t;
+        final double localT;
+        final double[] cX;
+        final double[] cY;
+
+        SegmentData(double t, double localT, double[] cX, double[] cY) {
+            this.t = t;
+            this.localT = localT;
+            this.cX = cX;
+            this.cY = cY;
+        }
+    }
 
     /**
      * Constructs a continuous B-Spline from an array of waypoints.
@@ -44,8 +61,8 @@ public class BSpline implements ParametricSegment {
         // Create ghost points
         Vector[] paddedPoints = new Vector[inputPoints.length + 2];
         paddedPoints[0] = inputPoints[1].reflect(inputPoints[0]);
-        paddedPoints[paddedPoints.length - 1] =
-                inputPoints[inputPoints.length - 2].reflect(inputPoints[inputPoints.length - 1]);
+        paddedPoints[paddedPoints.length - 1] = inputPoints[inputPoints.length - 2]
+                .reflect(inputPoints[inputPoints.length - 1]);
         System.arraycopy(inputPoints, 0, paddedPoints, 1, inputPoints.length);
 
         // Precompute and cache coefficients for all segments
@@ -59,14 +76,31 @@ public class BSpline implements ParametricSegment {
             Vector p2 = paddedPoints[i + 2];
             Vector p3 = paddedPoints[i + 3];
 
-            double[] xWindow = {p0.getX().getIn(), p1.getX().getIn(), p2.getX().getIn(),
+            double[] xWindow = new double[]{p0.getX().getIn(), p1.getX().getIn(), p2.getX().getIn(),
                     p3.getX().getIn()};
-            double[] yWindow = {p0.getY().getIn(), p1.getY().getIn(), p2.getY().getIn(),
+            double[] yWindow = new double[]{p0.getY().getIn(), p1.getY().getIn(), p2.getY().getIn(),
                     p3.getY().getIn()};
 
             this.cx[i] = BLEND_MATRIX.multiply(xWindow);
             this.cy[i] = BLEND_MATRIX.multiply(yWindow);
         }
+    }
+
+    private SegmentData getSegmentData(double t) {
+        if (cachedSegment != null && cachedSegment.t == t) {
+            return cachedSegment;
+        }
+
+        double newT = t;
+        if (newT >= 1.0) { newT = 0.999999; }
+        if (newT < 0.0) { newT = 0.0; }
+
+        double continuousIndex = newT * numSegments;
+        int segment = (int) continuousIndex;
+        double localT = continuousIndex - segment;
+
+        cachedSegment = new SegmentData(t, localT, cx[segment], cy[segment]);
+        return cachedSegment;
     }
 
     /**
@@ -77,22 +111,15 @@ public class BSpline implements ParametricSegment {
      */
     @Override
     public Vector getPosition(double t) {
-        if (t >= 1.0) t = 0.999999;
-        if (t < 0.0) t = 0.0;
+        SegmentData seg = getSegmentData(t);
 
-        double continuousIndex = t * numSegments;
-        int segment = (int) continuousIndex;
-        double localT = continuousIndex - segment;
-
-        // Grab precomputed coefficients
-        double[] cX = cx[segment];
-        double[] cY = cy[segment];
-
-        // Position: c3*t^3 + c2*t^2 + c1*t + c0
-        double x = ((cX[0] * localT + cX[1]) * localT + cX[2]) * localT + cX[3];
-        double y = ((cY[0] * localT + cY[1]) * localT + cY[2]) * localT + cY[3];
-
-        return Vector.of(x, y, DistUnit.IN);
+        return Vector.of(
+                ((seg.cX[0] * seg.localT + seg.cX[1]) * seg.localT + seg.cX[2]) *
+                        seg.localT + seg.cX[3],
+                ((seg.cY[0] * seg.localT + seg.cY[1]) * seg.localT + seg.cY[2]) *
+                        seg.localT + seg.cY[3],
+                DistUnit.IN
+        );
     }
 
     /**
@@ -103,22 +130,16 @@ public class BSpline implements ParametricSegment {
      */
     @Override
     public Vector getFirstDerivative(double t) {
-        if (t >= 1.0) t = 0.999999;
-        if (t < 0.0) t = 0.0;
-
-        double continuousIndex = t * numSegments;
-        int segment = (int) continuousIndex;
-        double localT = continuousIndex - segment;
-
-        double[] cX = cx[segment];
-        double[] cY = cy[segment];
+        SegmentData segment = getSegmentData(t);
 
         // Velocity: 3*c3*t^2 + 2*c2*t + c1
-        double dx = (3.0 * cX[0] * localT + 2.0 * cX[1]) * localT + cX[2];
-        double dy = (3.0 * cY[0] * localT + 2.0 * cY[1]) * localT + cY[2];
-
-        // Chain rule scaling
-        return Vector.of(dx, dy, DistUnit.IN).times(numSegments);
+        return Vector.of(
+                (3.0 * segment.cX[0] * segment.localT + 2.0 * segment.cX[1]) *
+                        segment.localT + segment.cX[2],
+                (3.0 * segment.cY[0] * segment.localT + 2.0 * segment.cY[1]) *
+                        segment.localT + segment.cY[2],
+                DistUnit.IN
+        ).times(numSegments); // Chain rule scaling
     }
 
     /**
@@ -129,21 +150,13 @@ public class BSpline implements ParametricSegment {
      */
     @Override
     public Vector getSecondDerivative(double t) {
-        if (t >= 1.0) t = 0.999999;
-        if (t < 0.0) t = 0.0;
-
-        double continuousIndex = t * numSegments;
-        int segment = (int) continuousIndex;
-        double localT = continuousIndex - segment;
-
-        double[] cX = cx[segment];
-        double[] cY = cy[segment];
+        SegmentData segment = getSegmentData(t);
 
         // Acceleration: 6*c3*t + 2*c2
-        double ddx = 6.0 * cX[0] * localT + 2.0 * cX[1];
-        double ddy = 6.0 * cY[0] * localT + 2.0 * cY[1];
-
-        // Chain rule scaling
-        return Vector.of(ddx, ddy, DistUnit.IN).times((double) numSegments * numSegments);
+        return Vector.of(
+                6.0 * segment.cX[0] * segment.localT + 2.0 * segment.cX[1],
+                6.0 * segment.cY[0] * segment.localT + 2.0 * segment.cY[1],
+                DistUnit.IN
+        ).times(numSegments * numSegments); // Chain rule scaling
     }
 }

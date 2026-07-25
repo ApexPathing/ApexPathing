@@ -1,16 +1,19 @@
 package feedforward.generators;
 
+import androidx.annotation.NonNull;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import core.FollowerConstants;
-import feedforward.FeedforwardLut;
+import feedforward.FFLut;
 import feedforward.MotionParameters;
 import geometry.PathPoint;
 import geometry.Vector;
 import paths.constraint.AngularConstraint;
 import paths.constraint.PathConstraint;
-import paths.constraint.PathConstraint.ConstraintType;
+import paths.constraint.PathConstraint.Type;
 import paths.constraint.TranslationalConstraint;
 import paths.movements.FollowerMovement;
 import paths.movements.Path;
@@ -18,43 +21,40 @@ import paths.movements.Path;
 /**
  * Shared path-parameterized profile generator.
  *
- * <p>
- * Subclasses provide the drivetrain-specific power model through {@link #evaluatePoint}.
- * The shared algorithm does the drivetrain-independent work: sample the path, apply velocity
+ * <p>Subclasses provide the drivetrain-specific power model through {@link #evaluatePoint}. The
+ * shared algorithm does the drivetrain-independent work: sample the path, apply velocity
  * ceilings, run acceleration/deceleration sweeps, then iteratively lower any samples that still
  * exceed normalized power utilization.
- * </p>
  *
  * @author DrPixelCat - 7842 alum
  */
 public abstract class BaseProfileGenerator {
+    protected static final double EPSILON = 1e-6;
     /** Normalized full power. Values above this mean the model predicts saturation. */
     private static final double UTILIZATION_LIMIT = 1.0;
     /** Small allowance so floating point noise does not create endless pinning. */
     private static final double UTILIZATION_TOLERANCE = 1e-3;
-    /** Shared tiny value used to avoid divide-by-zero and unstable comparisons. */
-    private static final double EPSILON = 1e-6;
     /** Binary-search depth for local velocity caps. */
     private static final int PIN_SEARCH_ITERATIONS = 20;
 
-    /** Movement being profiled. This base class currently expects a {@link Path}. */
-    protected FollowerMovement path;
-    /** Debug information from the most recent full generation run. */
+    protected final FollowerConstants constants;
+    protected final FollowerMovement path;
     private DebugReport lastReport;
 
-    /**
-     * @return diagnostics from the last call to {@link #generate()}
-     */
-    public DebugReport getLastDebugReport() {
-        return lastReport;
+    protected BaseProfileGenerator(FollowerConstants constants, FollowerMovement path) {
+        this.constants = constants;
+        this.path = path;
     }
+
+    /** @return diagnostics from the last call to {@link #generate()} */
+    public DebugReport getLastDebugReport() { return lastReport; }
 
     // region Abstract Methods
 
     /**
      * Calculates the velocity ceiling at one path sample.
-     * <p>
-     * Subclasses fold in drivetrain geometry here. For example, mecanum uses direction-dependent
+     *
+     * <p>Subclasses fold in drivetrain geometry here. For example, mecanum uses direction-dependent
      * limits while tank only has forward and heading demand.
      *
      * @param point path sample being evaluated
@@ -68,53 +68,31 @@ public abstract class BaseProfileGenerator {
 
     /**
      * Evaluates normalized drivetrain utilization for the segment ending at {@code current}.
-     * <p>
-     * Inputs are the local kinematic state. Outputs split utilization into translational,
+     *
+     * <p>Inputs are the local kinematic state. Outputs split utilization into translational,
      * lateral/centripetal, and heading terms so the debug report can explain what saturated.
      */
-    protected abstract void evaluatePoint(
-            Path path, PathPoint prev, PathPoint current,
-            double v_prev, double v, double a_t,
-            EvaluationResult outResult
-    );
+    protected abstract void evaluatePoint(Path path, PathPoint prev, PathPoint current,
+                                          double v_prev, double v, double a_t,
+                                          EvaluationResult outResult);
 
-    /**
-     * Computes allowed braking acceleration for the backward pass.
-     */
-    protected abstract double getMaxTangentialAccel(double currentVel, PathPoint point, Path path
-            , double maxAngAccel);
+    /** Computes allowed braking acceleration for the backward pass. */
+    protected abstract double getMaxTangentialAccel(double currentVel, PathPoint point, Path path,
+                                                    double maxAngAccel);
 
-    /**
-     * Computes allowed positive acceleration for the forward pass.
-     */
+    /** Computes allowed positive acceleration for the forward pass. */
     protected abstract double calculateDynamicMaxAccel(double currentVel, PathPoint point,
                                                        Path path, double maxAngAccel);
 
     // region Master Loop
 
     /**
-     * Builds the first pass profile before the iterative pinning loop.
-     * Useful for comparing the raw constraint sweep against {@link #generate()}.
-     */
-    public MotionParameters[] generateInitialProfile() {
-        Path path = (Path) this.path;
-        PathPoint[] points = path.getGeneratedPoints();
-
-        MotionParameters[] outputParams = generateBasePass(points, path);
-        runBackwardPass(outputParams, points, path);
-        runForwardPass(outputParams, points, path);
-
-        populateKinematicsAndPower(outputParams, points, path);
-        return outputParams;
-    }
-
-    /**
      * Generates a velocity profile and tightens any point that exceeds drivetrain utilization.
-     * <p>
-     * The paper's central idea is that each target state {@code [v, a, omega, alpha]} should get
-     * close to full normalized utilization without asking for more than the motors can provide.
-     * The first sweep handles obvious velocity/acceleration constraints; the pinning loop cleans
-     * up coupled cases where translation, centripetal force, and heading demand add to more than 1.
+     *
+     * <p>Each target state {@code [v, a, omega, alpha]} should get close to full normalized
+     * utilization without asking for more than the motors can provide. The first sweep handles
+     * obvious velocity/acceleration constraints; the pinning loop cleans up coupled cases where
+     * translation, centripetal force, and heading demand add to more than 1.
      */
     public MotionParameters[] generate() {
         if (!(path instanceof Path)) {
@@ -185,10 +163,10 @@ public abstract class BaseProfileGenerator {
     }
 
     /**
-     * Calculates and populates the remaining kinematic variables (acceleration, angular velocity, power)
-     * based on the final velocity sweep.
-     * <p>
-     * Main formulas:
+     * Calculates and populates the remaining kinematic variables (acceleration, angular velocity,
+     * power) based on the final velocity sweep.
+     *
+     * <p>Main formulas:
      * {@code a = (v^2 - v_prev^2) / (2 * ds)},
      * {@code omega = dtheta/ds * v}, and
      * {@code alpha = d2theta/ds2 * v^2 + dtheta/ds * a}.
@@ -205,11 +183,13 @@ public abstract class BaseProfileGenerator {
         lut[0].setAngularAccel(0.0);
 
         for (int i = 1; i < points.length; i++) {
-            double ds = Math.abs(points[i].getDistanceToEndIn() - points[i - 1].getDistanceToEndIn());
+            double ds = Math.abs(points[i].getDistanceToEndIn() -
+                    points[i - 1].getDistanceToEndIn());
             double v = lut[i].getTangentialVel();
             double v_prev = lut[i - 1].getTangentialVel();
+
             // Constant-acceleration kinematics in path-distance space.
-            double a_t = (ds < EPSILON) ? 0.0 : ((v * v) - (v_prev * v_prev)) / (2.0 * ds);
+            double a_t = (ds < EPSILON) ? 0.0 : (v * v - v_prev * v_prev) / (2.0 * ds);
 
             lut[i].setTangentialAccel(a_t);
 
@@ -217,12 +197,14 @@ public abstract class BaseProfileGenerator {
             double kappa = points[i].getSignedCurvature();
             double dKappa = points[i].getCurvatureDerivative();
 
-            double fPrime = path.getInterpolator().getHeadingFirstDerivative(s, kappa, finalTangent);
-            double fDoublePrime = path.getInterpolator().getHeadingSecondDerivative(s, dKappa, finalTangent);
+            double fPrime = path.getInterpolator()
+                    .getHeadingFirstDerivative(s, kappa, finalTangent);
+            double fDoublePrime = path.getInterpolator()
+                    .getHeadingSecondDerivative(s, dKappa, finalTangent);
 
-            // theta_dot = dtheta/ds * ds/dt. theta_ddot also carries the path acceleration term.
+            // theta_dot = dtheta/ds * ds/dt. theta_dot also carries the path acceleration term.
             lut[i].setAngularVel(fPrime * v);
-            lut[i].setAngularAccel((fDoublePrime * (v * v)) + (fPrime * a_t));
+            lut[i].setAngularAccel(fDoublePrime * (v * v) + fPrime * a_t);
 
             evaluatePoint(path, points[i - 1], points[i], v_prev, v, a_t, currentEval);
             lut[i].setMotorPower(currentEval.totalPower);
@@ -244,14 +226,14 @@ public abstract class BaseProfileGenerator {
 
     /**
      * Generates a simple profile using only global forward acceleration limits.
-     * <p>
-     * This is cheaper than {@link #generate()} but does not try to solve the full coupled
+     *
+     * <p>This is cheaper than {@link #generate()} but does not try to solve the full coupled
      * utilization problem.
      *
      * @param config follower constants containing global limits
      * @return quick feedforward lookup table
      */
-    public FeedforwardLut generateQuick(FollowerConstants config) {
+    public FFLut generateQuick(FollowerConstants config) {
         Path path = (Path) this.path;
         PathPoint[] points = path.getGeneratedPoints();
         MotionParameters[] lut = new MotionParameters[points.length];
@@ -267,24 +249,20 @@ public abstract class BaseProfileGenerator {
 
         // Backward pass: Naive deceleration
         // If boosted, relax the boundary condition so the path ends at cruising speed
-        if (!path.isAccelBoosted()) {
-            lut[points.length - 1].setTangentialVel(0.0);
-        }
+        if (!path.isAccelBoosted()) { lut[points.length - 1].setTangentialVel(0.0); }
 
         for (int i = points.length - 2; i >= 0; i--) {
             double ds =
                     Math.abs(points[i + 1].getDistanceToEndIn() - points[i].getDistanceToEndIn());
             double nextVel = lut[i + 1].getTangentialVel();
             double maxReachableVel =
-                    Math.sqrt((nextVel * nextVel) + (2.0 * config.forwardAccelLimitIn * ds));
+                    Math.sqrt(nextVel * nextVel + 2.0 * config.forwardAccelLimitIn * ds);
             lut[i].setTangentialVel(Math.min(lut[i].getTangentialVel(), maxReachableVel));
         }
 
         // Forward pass: Naive acceleration and populate angular targets
         // If boosted, relax the boundary condition so the path begins at cruising speed
-        if (!path.isAccelBoosted()) {
-            lut[0].setTangentialVel(0.0);
-        }
+        if (!path.isAccelBoosted()) { lut[0].setTangentialVel(0.0); }
         Vector finalTangent = path.getParametricPath().getFirstDerivative(1.0);
 
         for (int i = 1; i < points.length; i++) {
@@ -292,12 +270,12 @@ public abstract class BaseProfileGenerator {
                     Math.abs(points[i].getDistanceToEndIn() - points[i - 1].getDistanceToEndIn());
             double prevVel = lut[i - 1].getTangentialVel();
             double maxReachableVel =
-                    Math.sqrt((prevVel * prevVel) + (2.0 * config.forwardAccelLimitIn * ds));
+                    Math.sqrt(prevVel * prevVel + 2.0 * config.forwardAccelLimitIn * ds);
 
             double v = Math.min(lut[i].getTangentialVel(), maxReachableVel);
             lut[i].setTangentialVel(v);
 
-            double a_t = (ds < EPSILON) ? 0.0 : ((v * v) - (prevVel * prevVel)) / (2.0 * ds);
+            double a_t = (ds < EPSILON) ? 0.0 : (v * v - prevVel * prevVel) / (2.0 * ds);
             lut[i].setTangentialAccel(a_t);
 
             double s = points[i].getDistanceToEndIn();
@@ -310,18 +288,18 @@ public abstract class BaseProfileGenerator {
                     finalTangent);
 
             lut[i].setAngularVel(fPrime * v);
-            lut[i].setAngularAccel((fDoublePrime * (v * v)) + (fPrime * a_t));
+            lut[i].setAngularAccel(fDoublePrime * (v * v) + fPrime * a_t);
         }
 
-        return new FeedforwardLut(lut);
+        return new FFLut(lut);
     }
 
     // region Fwd/Bkwd Passes
 
     /**
      * Creates the first velocity row for every sampled path point.
-     * <p>
-     * Path constraints are treated as stepwise: once the path progression passes a constraint's
+     *
+     * <p>Path constraints are treated as stepwise: once the path progression passes a constraint's
      * {@code s}, that constraint remains active until another one overrides it.
      */
     private MotionParameters[] generateBasePass(PathPoint[] points, Path path) {
@@ -331,17 +309,20 @@ public abstract class BaseProfileGenerator {
 
         for (int i = 0; i < points.length; i++) {
             // Constraints are stepwise: the latest constraint whose s has been reached is active.
-            double pctCompleted = 1.0 - (points[i].getDistanceToEndIn() / pathLength_in);
+            double pctCompleted = 1.0 - points[i].getDistanceToEndIn() / pathLength_in;
             double currentMaxVel = Double.MAX_VALUE;
             double currentMaxAngVel = Double.MAX_VALUE;
             double currentMaxAngAccel = Double.MAX_VALUE;
             for (PathConstraint constraint : constraints) {
                 if (constraint.getS() <= pctCompleted) {
-                    if (constraint instanceof TranslationalConstraint && constraint.getType() == ConstraintType.VELOCITY)  {
+                    if (constraint instanceof TranslationalConstraint &&
+                            constraint.getType() == Type.VELOCITY)  {
                         currentMaxVel = ((TranslationalConstraint) constraint).getValueIn();
-                    } else if (constraint instanceof AngularConstraint && constraint.getType() == ConstraintType.VELOCITY) {
+                    } else if (constraint instanceof AngularConstraint &&
+                            constraint.getType() == Type.VELOCITY) {
                         currentMaxAngVel = ((AngularConstraint) constraint).getValueRad();
-                    } else if (constraint instanceof AngularConstraint && constraint.getType() == ConstraintType.ACCELERATION) {
+                    } else if (constraint instanceof AngularConstraint &&
+                            constraint.getType() == Type.ACCELERATION) {
                         currentMaxAngAccel = ((AngularConstraint) constraint).getValueRad();
                     }
                 }
@@ -349,7 +330,8 @@ public abstract class BaseProfileGenerator {
 
             // Let the drivetrain-specific subclass translate heading/curvature demand into a
             // local top speed, then apply any explicit translational velocity constraint.
-            double maxVel = calculateMaxTangentialVelocity(points[i], path, currentMaxAngVel, currentMaxAngAccel);
+            double maxVel = calculateMaxTangentialVelocity(points[i], path, currentMaxAngVel,
+                    currentMaxAngAccel);
             if (currentMaxVel != Double.MAX_VALUE && currentMaxVel > 0.0) {
                 maxVel = Math.min(maxVel, currentMaxVel);
             }
@@ -364,15 +346,13 @@ public abstract class BaseProfileGenerator {
 
     /**
      * Sweeps from end to start so every point can decelerate into the next point.
-     * <p>
-     * The reachability equation is {@code v0 = sqrt(v1^2 + 2 * a * ds)}. After that normal
+     *
+     * <p>The reachability equation is {@code v0 = sqrt(v1^2 + 2 * a * ds)}. After that normal
      * kinematic cap, the code optionally binary-searches the previous velocity against the full
      * power model because braking plus turning can still saturate.
      */
     private void runBackwardPass(MotionParameters[] lut, PathPoint[] points, Path path) {
-        if (!path.isAccelBoosted()) {
-            lut[points.length - 1].setTangentialVel(0.0);
-        }
+        if (!path.isAccelBoosted()) { lut[points.length - 1].setTangentialVel(0.0); }
 
         double pathLength_in = Math.max(path.getParametricPath().getLengthIn(), EPSILON);
         PathConstraint[] constraints = path.getConstraints();
@@ -386,17 +366,17 @@ public abstract class BaseProfileGenerator {
                 continue;
             }
 
-            double pctCompleted = 1.0 - (points[i + 1].getDistanceToEndIn() / pathLength_in);
+            double pctCompleted = 1.0 - points[i + 1].getDistanceToEndIn() / pathLength_in;
             double currentMaxAccel = Double.MAX_VALUE;
             double currentMaxAngAccel = Double.MAX_VALUE;
 
             for (PathConstraint constraint : constraints) {
                 if (constraint.getS() <= pctCompleted) {
                     if (constraint instanceof TranslationalConstraint &&
-                            constraint.getType() == ConstraintType.ACCELERATION) {
+                            constraint.getType() == Type.ACCELERATION) {
                         currentMaxAccel = ((TranslationalConstraint) constraint).getValueIn();
                     } else if (constraint instanceof AngularConstraint &&
-                            constraint.getType() == ConstraintType.ACCELERATION) {
+                            constraint.getType() == Type.ACCELERATION) {
                         currentMaxAngAccel = ((AngularConstraint) constraint).getValueRad();
                     }
                 }
@@ -423,16 +403,14 @@ public abstract class BaseProfileGenerator {
 
     /**
      * Sweeps from start to end so every point can accelerate from the previous point.
-     * <p>
-     * This is the forward companion to {@link #runBackwardPass}. Together the two passes create a
-     * profile that respects both start/end boundary conditions and local acceleration limits.
+     *
+     * <p>This is the forward companion to {@link #runBackwardPass}. Together the two passes create
+     * a profile that respects both start/end boundary conditions and local acceleration limits.
      */
     private void runForwardPass(MotionParameters[] lut, PathPoint[] points, Path path) {
         /* If boosted, relax the boundary condition so the path begins at cruising speed so the
         feedback controller can provide maximum +/- power */
-        if (!path.isAccelBoosted()) {
-            lut[0].setTangentialVel(0.0);
-        }
+        if (!path.isAccelBoosted()) { lut[0].setTangentialVel(0.0); }
 
         double pathLength_in = Math.max(path.getParametricPath().getLengthIn(), EPSILON);
         PathConstraint[] constraints = path.getConstraints();
@@ -446,15 +424,17 @@ public abstract class BaseProfileGenerator {
                 continue;
             }
 
-            double pctCompleted = 1.0 - (points[i].getDistanceToEndIn() / pathLength_in);
+            double pctCompleted = 1.0 - points[i].getDistanceToEndIn() / pathLength_in;
             double currentMaxAccel = Double.MAX_VALUE;
             double currentMaxAngAccel = Double.MAX_VALUE;
 
             for (PathConstraint constraint : constraints) {
                 if (constraint.getS() <= pctCompleted) {
-                    if (constraint instanceof TranslationalConstraint && constraint.getType() == ConstraintType.ACCELERATION) {
+                    if (constraint instanceof TranslationalConstraint &&
+                            constraint.getType() == Type.ACCELERATION) {
                         currentMaxAccel = ((TranslationalConstraint) constraint).getValueIn();
-                    } else if (constraint instanceof AngularConstraint && constraint.getType() == ConstraintType.ACCELERATION) {
+                    } else if (constraint instanceof AngularConstraint &&
+                            constraint.getType() == Type.ACCELERATION) {
                         currentMaxAngAccel = ((AngularConstraint) constraint).getValueRad();
                     }
                 }
@@ -481,8 +461,8 @@ public abstract class BaseProfileGenerator {
 
     /**
      * Chooses which velocity sample to lower when a later sample is over-utilized.
-     * <p>
-     * During braking, lowering the point before the saturated sample is usually more useful than
+     *
+     * <p>During braking, lowering the point before the saturated sample is usually more useful than
      * lowering the already-braking sample itself.
      */
     private int choosePinIndex(MotionParameters[] lut, int worstIndex) {
@@ -494,20 +474,14 @@ public abstract class BaseProfileGenerator {
             preferredIndex = worstIndex - 1;
         }
 
-        if (lut[preferredIndex].getTangentialVel() > EPSILON) {
-            return preferredIndex;
-        }
+        if (lut[preferredIndex].getTangentialVel() > EPSILON) { return preferredIndex; }
 
         for (int i = worstIndex - 1; i >= 0; i--) {
-            if (lut[i].getTangentialVel() > EPSILON) {
-                return i;
-            }
+            if (lut[i].getTangentialVel() > EPSILON) { return i; }
         }
 
         for (int i = worstIndex + 1; i < lut.length; i++) {
-            if (lut[i].getTangentialVel() > EPSILON) {
-                return i;
-            }
+            if (lut[i].getTangentialVel() > EPSILON) { return i; }
         }
 
         return preferredIndex;
@@ -515,17 +489,15 @@ public abstract class BaseProfileGenerator {
 
     /**
      * Binary-searches a pinned velocity that makes the checked point feasible after both sweeps.
-     * <p>
-     * A single point's velocity is not meaningful by itself: changing it can affect neighboring
+     *
+     * <p>A single point's velocity is not meaningful by itself: changing it can affect neighboring
      * samples through acceleration limits. That is why each candidate is tested after rerunning
      * the backward and forward passes.
      */
     private double findPinnedVelocity(MotionParameters[] currentProfile, PathPoint[] points,
                                       Path path, int pinIndex, int checkIndex,
                                       double currentVelocity) {
-        if (currentVelocity <= EPSILON) {
-            return 0.0;
-        }
+        if (currentVelocity <= EPSILON) { return 0.0; }
 
         double low = 0.0;
         double high = currentVelocity;
@@ -542,21 +514,17 @@ public abstract class BaseProfileGenerator {
             runForwardPass(trialProfile, points, path);
             populateKinematicsAndPower(trialProfile, points, path);
 
-            if (trialProfile[boundedCheckIndex].getMotorPower()
-                    <= UTILIZATION_LIMIT + UTILIZATION_TOLERANCE) {
+            if (trialProfile[boundedCheckIndex].getMotorPower() <=
+                    UTILIZATION_LIMIT + UTILIZATION_TOLERANCE) {
                 bestVelocity = trialProfile[pinIndex].getTangentialVel();
                 low = candidate;
-            } else {
-                high = candidate;
-            }
+            } else { high = candidate; }
         }
 
         return Math.min(bestVelocity, currentVelocity);
     }
 
-    /**
-     * Makes a mutable copy so binary-search candidates do not disturb the real profile.
-     */
+    /** Makes a mutable copy so binary-search candidates do not disturb the real profile. */
     private MotionParameters[] copyProfile(MotionParameters[] profile) {
         MotionParameters[] copy = new MotionParameters[profile.length];
         for (int i = 0; i < profile.length; i++) {
@@ -578,25 +546,21 @@ public abstract class BaseProfileGenerator {
     private double findMaxPreviousVelocity(Path path, PathPoint prevPoint,
                                            PathPoint currentPoint, double nextVel,
                                            double upperVel, double maxDecel, double ds) {
-        if (upperVel <= nextVel + EPSILON) {
-            return upperVel;
-        }
+        if (upperVel <= nextVel + EPSILON) { return upperVel; }
 
-        double low = Math.min(nextVel, upperVel);
         double high = upperVel;
         if (isBackwardTransitionFeasible(path, prevPoint, currentPoint, nextVel, high,
                 maxDecel, ds)) {
             return high;
         }
 
+        double low = Math.min(nextVel, upperVel);
         for (int i = 0; i < PIN_SEARCH_ITERATIONS; i++) {
             double candidate = (low + high) / 2.0;
             if (isBackwardTransitionFeasible(path, prevPoint, currentPoint, nextVel, candidate,
                     maxDecel, ds)) {
                 low = candidate;
-            } else {
-                high = candidate;
-            }
+            } else { high = candidate; }
         }
 
         return low;
@@ -609,59 +573,45 @@ public abstract class BaseProfileGenerator {
     private double findMaxNextVelocity(Path path, PathPoint prevPoint, PathPoint currentPoint,
                                        double prevVel, double upperVel, double maxAccel,
                                        double ds) {
-        if (upperVel <= prevVel + EPSILON) {
-            return upperVel;
-        }
+        if (upperVel <= prevVel + EPSILON) { return upperVel; }
 
-        double low = Math.min(prevVel, upperVel);
         double high = upperVel;
         if (isForwardTransitionFeasible(path, prevPoint, currentPoint, high, prevVel,
                 maxAccel, ds)) {
             return high;
         }
 
+        double low = Math.min(prevVel, upperVel);
         for (int i = 0; i < PIN_SEARCH_ITERATIONS; i++) {
             double candidate = (low + high) / 2.0;
             if (isForwardTransitionFeasible(path, prevPoint, currentPoint, candidate, prevVel,
                     maxAccel, ds)) {
                 low = candidate;
-            } else {
-                high = candidate;
-            }
+            } else { high = candidate; }
         }
 
         return low;
     }
 
-    /**
-     * Checks a braking transition from {@code prevVel} to {@code nextVel}.
-     */
+    /** Checks a braking transition from {@code prevVel} to {@code nextVel}. */
     private boolean isBackwardTransitionFeasible(Path path, PathPoint prevPoint,
                                                  PathPoint currentPoint, double nextVel,
                                                  double prevVel, double maxDecel, double ds) {
         double accel = calculateTangentialAccel(prevVel, nextVel, ds);
-        if (accel < -maxDecel - EPSILON) {
-            return false;
-        }
-        return isPowerFeasible(path, prevPoint, currentPoint, prevVel, nextVel, accel);
+        return !(accel < -maxDecel - EPSILON) &&
+                isPowerFeasible(path, prevPoint, currentPoint, prevVel, nextVel, accel);
     }
 
-    /**
-     * Checks an accelerating transition from {@code prevVel} to {@code nextVel}.
-     */
+    /** Checks an accelerating transition from {@code prevVel} to {@code nextVel}. */
     private boolean isForwardTransitionFeasible(Path path, PathPoint prevPoint,
-                                                PathPoint currentPoint, double nextVel, double prevVel,
-                                                double maxAccel, double ds) {
+                                                PathPoint currentPoint, double nextVel,
+                                                double prevVel, double maxAccel, double ds) {
         double accel = calculateTangentialAccel(prevVel, nextVel, ds);
-        if (accel > maxAccel + EPSILON) {
-            return false;
-        }
-        return isPowerFeasible(path, prevPoint, currentPoint, prevVel, nextVel, accel);
+        return !(accel > maxAccel + EPSILON) &&
+                isPowerFeasible(path, prevPoint, currentPoint, prevVel, nextVel, accel);
     }
 
-    /**
-     * Runs the subclass power model and compares it against normalized full power.
-     */
+    /** Runs the subclass power model and compares it against normalized full power. */
     private boolean isPowerFeasible(Path path, PathPoint prevPoint, PathPoint currentPoint,
                                     double prevVel, double nextVel, double accel) {
         EvaluationResult result = new EvaluationResult();
@@ -669,45 +619,40 @@ public abstract class BaseProfileGenerator {
         return result.maxUtilization <= UTILIZATION_LIMIT + UTILIZATION_TOLERANCE;
     }
 
-    /**
-     * Calculates constant tangential acceleration from two velocities over distance.
-     */
+    /** Calculates constant tangential acceleration from two velocities over distance. */
     private double calculateTangentialAccel(double prevVel, double nextVel, double ds) {
-        if (ds <= EPSILON) {
-            return 0.0;
-        }
-        return ((nextVel * nextVel) - (prevVel * prevVel)) / (2.0 * ds);
+        if (ds <= EPSILON) { return 0.0; }
+        return (nextVel * nextVel - prevVel * prevVel) / (2.0 * ds);
     }
 
-    /**
-     * Computes {@code sqrt(v0^2 + 2*a*ds)} while guarding against tiny negative roundoff.
-     */
+    /** Computes {@code sqrt(v0^2 + 2*a*ds)} while guarding against tiny negative roundoff. */
     private double safeReachableVelocity(double startVelocity, double accel, double ds) {
-        if (ds <= EPSILON) {
-            return startVelocity;
-        }
+        if (ds <= EPSILON) { return startVelocity; }
 
-        double velocitySq = (startVelocity * startVelocity) + (2.0 * accel * ds);
+        double velocitySq = startVelocity * startVelocity + 2.0 * accel * ds;
         return Math.sqrt(Math.max(0.0, velocitySq));
     }
 
-    /**
-     * Converts invalid or negative acceleration caps into a safe zero cap.
-     */
+    /** Converts invalid or negative acceleration caps into a safe zero cap. */
     private double sanitizeNonNegative(double value) {
-        if (!Double.isFinite(value) || value < 0.0) {
-            return 0.0;
-        }
+        if (!Double.isFinite(value) || value < 0.0) { return 0.0; }
         return value;
+    }
+
+    /** Applies static friction in the direction implied by velocity, or acceleration from rest. */
+    protected double signedStatic(double velocity, double accel, double kS) {
+        if (Math.abs(velocity) > EPSILON) { return Math.signum(velocity) * kS; }
+        if (Math.abs(accel) > EPSILON) { return Math.signum(accel) * kS; }
+        return 0.0;
     }
 
     // region Logging and CSV Export
 
     /**
      * Output container for one drivetrain power evaluation.
-     * <p>
-     * {@code totalPower} and {@code maxUtilization} are normalized, where 1.0 means full available
-     * power. The component fields are diagnostic terms.
+     *
+     * <p>{@code totalPower} and {@code maxUtilization} are normalized, where 1.0 means full
+     * available power. The component fields are diagnostic terms.
      */
     public static class EvaluationResult {
         public double totalPower = 0.0;
@@ -716,9 +661,7 @@ public abstract class BaseProfileGenerator {
         public double pLateral = 0.0;
         public double pHeading = 0.0;
 
-        /**
-         * Copies another result into this object to avoid repeated allocations in hot loops.
-         */
+        /** Copies another result into this object to avoid repeated allocations in hot loops. */
         public void copyFrom(EvaluationResult other) {
             this.totalPower = other.totalPower;
             this.maxUtilization = other.maxUtilization;
@@ -728,27 +671,25 @@ public abstract class BaseProfileGenerator {
         }
     }
 
-    /**
-     * Summary of the iterative pinning phase from a generated profile.
-     */
+    /** Summary of the iterative pinning phase from a generated profile. */
     public static class DebugReport {
         public int iterationsRun = 0;
         public boolean converged = false;
         public double finalMaxUtilization = 0.0;
-        public List<IterationLog> logs = new ArrayList<>();
+        public List<IterationLog> logs = new ArrayList<IterationLog>();
 
-        /**
-         * @return compact human-readable convergence summary
-         */
-        public String getSummary() {
-            return String.format("Converged: %b | Iterations: %d | Final Max Util: %.3f",
-                    converged, iterationsRun, finalMaxUtilization);
+        @Override
+        @NonNull
+        public String toString() {
+            return String.format(
+                    Locale.ENGLISH,
+                    "Converged: %b | Iterations: %d | Final Max Util: %.3f",
+                    converged, iterationsRun, finalMaxUtilization
+            );
         }
     }
 
-    /**
-     * One iteration of the pinning loop.
-     */
+    /** One iteration of the pinning loop. */
     public static class IterationLog {
         public int iteration;
         public int pinnedIndex;
@@ -757,9 +698,7 @@ public abstract class BaseProfileGenerator {
         public double pForward, pLateral, pHeading;
     }
 
-    /**
-     * Internal aggregate used to find the worst point in the current profile.
-     */
+    /** Internal aggregate used to find the worst point in the current profile. */
     private static class ProfileEvaluation {
         int worstIndex = 0;
         double maxUtilization = 0.0;

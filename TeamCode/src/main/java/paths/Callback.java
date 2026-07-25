@@ -12,10 +12,7 @@ import geometry.Angle;
  * @author Sohum Arora - 22985 Paraducks
  */
 public class Callback {
-    public enum CallbackType {
-        DISTANCE,
-        ANGLE
-    }
+    public enum CallbackType { DISTANCE,  ANGLE }
 
     private final CallbackType type;
     private final Runnable action;
@@ -65,6 +62,7 @@ public class Callback {
      */
     public double getS() {
         if (this.type != CallbackType.DISTANCE) {
+            // noinspection ConstantExpression
             throw new IllegalStateException("Refusing to fetch distance parameter 's' from an " +
                     "ANGLE-type callback!");
         }
@@ -78,6 +76,7 @@ public class Callback {
      */
     public Angle getTheta() {
         if (this.type != CallbackType.ANGLE) {
+            // noinspection ConstantExpression
             throw new IllegalStateException("Refusing to fetch target angle 'theta' from a " +
                     "DISTANCE-type callback!");
         }

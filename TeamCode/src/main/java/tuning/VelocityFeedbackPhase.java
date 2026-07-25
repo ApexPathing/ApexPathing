@@ -1,9 +1,12 @@
 package tuning;
 
+import feedforward.MotionParameters;
 import geometry.AngleUnit;
 import geometry.DistUnit;
 import geometry.GeometryFactory;
+import geometry.PathSegment;
 import geometry.Pose;
+import geometry.Vector;
 import paths.heading.InterpolationStyle;
 import paths.movements.FollowerMovement;
 import paths.movements.Path;
@@ -20,10 +23,7 @@ import paths.movements.Turn;
 public class VelocityFeedbackPhase extends TuningPhase {
     private static final int SEARCH_ROUNDS = 4;
 
-    enum FeedbackAxis {
-        TRANSLATION,
-        ANGULAR
-    }
+    enum FeedbackAxis { TRANSLATION, ANGULAR }
 
     private final double[] gains = new double[3];
     private final double[] scores = new double[3];
@@ -33,6 +33,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     private FollowerMovement currentMovement;
     private boolean forwardIsRunning;
+    private double currentTurnDirection;
 
     private FeedbackAxis axis;
     private int candidate;
@@ -98,13 +99,13 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     private void startSearch(FeedbackAxis nextAxis) {
         axis = nextAxis;
-        center = axis == FeedbackAxis.TRANSLATION ? context.constants.velocityFeedbackGain :
+        center = (axis == FeedbackAxis.TRANSLATION) ? context.constants.velocityFeedbackGain :
                 context.constants.angularVelocityFeedbackGain;
-        double feedforward = axis == FeedbackAxis.TRANSLATION ? context.constants.translationalKV :
-                context.constants.angularKV;
+        double feedforward = (axis == FeedbackAxis.TRANSLATION) ?
+                context.constants.translationalKV : context.constants.angularKV;
 
         step = Math.max(center * 0.5, Math.max(feedforward * 0.25, 0.00001));
-        if (center <= 0.0) center = step;
+        if (center <= 0.0) { center = step; }
 
         round = 0;
         startRound();
@@ -137,6 +138,10 @@ public class VelocityFeedbackPhase extends TuningPhase {
             currentMovement = forwardPath;
         } else {
             currentMovement = forwardTurn;
+            double rawDelta = forwardTurn.getStartPose().getHeading()
+                    .getShortestAngleTo(forwardTurn.getEndPose().getHeading()).getRad();
+            currentTurnDirection = Math.signum(rawDelta > Math.PI ?
+                    rawDelta - 2 * Math.PI : rawDelta);
         }
 
         context.getFollower().follow(currentMovement);
@@ -145,11 +150,33 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private void sampleTest() {
         if (!context.getFollower().isBusy()) { return; }
 
-        double desired = context.getFollower().getCurrentDesiredVel();
-        double actual = context.getFollower().getCurrentActualVel();
-        double minimumTarget = axis == FeedbackAxis.TRANSLATION ? 1.0 : 0.05;
+        if (axis == FeedbackAxis.TRANSLATION) {
+            Path path = (Path) currentMovement;
+            PathSegment segment = path.getParametricPath();
 
-        addError(desired, actual, minimumTarget);
+            // Retrieve pre-calculated 't' directly from Follower to save cycles
+            double t = context.getFollower().getBestT();
+            Vector target = segment.getPosition(t);
+            double remaining = segment.getDistanceToEndIn(target, t);
+            double traveled = segment.getLengthIn() - remaining;
+
+            MotionParameters desired = path.getFeedforwardLut().getFFParams(traveled);
+            Vector tangent = segment.getFirstDerivative(t).normalize();
+
+            // X is forward, Y is sideways layout works perfectly with this dot product
+            double actual = context.getFollower().getVelocity().getVec().dot(tangent).getIn();
+            addError(desired.getTangentialVel(), actual, 1.0);
+        } else {
+            Turn turn = (Turn) currentMovement;
+            double traveled = turn.getStartPose().getHeading().getShortestAngleTo(
+                    context.getFollower().getPose().getHeading()
+            ).getRad() * currentTurnDirection;
+
+            MotionParameters desired = turn.getFeedforwardLut()
+                    .getFFParams(Math.max(0.0, traveled));
+            double actual = context.getFollower().getVelocity().getHeading().getRad();
+            addError(desired.getAngularVel(), actual, 0.05);
+        }
     }
 
     private void addError(double target, double actual, double minimumTarget) {
@@ -163,9 +190,9 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private boolean updateTest() {
         sampleTest();
 
-        if (context.getFollower().isBusy()) {
-            return false;
-        } else if (forwardIsRunning) {
+        if (context.getFollower().isBusy()) { return false; }
+
+        if (forwardIsRunning) {
             forwardIsRunning = false;
 
             if (axis == FeedbackAxis.TRANSLATION) {
@@ -184,7 +211,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     @Override
     protected boolean autoTuned() {
-        if (!updateTest()) return false;
+        if (!updateTest()) { return false; }
 
         scores[candidate] = lastScore;
         candidate++;
@@ -195,7 +222,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
         int best = 0;
         for (int i = 1; i < scores.length; i++) {
-            if (scores[i] < scores[best]) best = i;
+            if (scores[i] < scores[best]) { best = i; }
         }
 
         center = gains[best];
@@ -213,16 +240,18 @@ public class VelocityFeedbackPhase extends TuningPhase {
             applyCurrentGains();
             startSearch(FeedbackAxis.ANGULAR);
             return false;
-        } else {
-            context.constants.angularVelocityFeedbackGain = center;
-            return true;
         }
+
+        // If we are here, we have finished tuning both axes
+        context.constants.angularVelocityFeedbackGain = center;
+        return true;
     }
 
     @Override
     protected boolean manualTuned() {
         if (opMode.gamepad1.leftBumperWasPressed() || opMode.gamepad1.rightBumperWasPressed()) {
-            axis = axis == FeedbackAxis.TRANSLATION ? FeedbackAxis.ANGULAR : FeedbackAxis.TRANSLATION;
+            axis = (axis == FeedbackAxis.TRANSLATION) ?
+                    FeedbackAxis.ANGULAR : FeedbackAxis.TRANSLATION;
             startTest();
         }
 
