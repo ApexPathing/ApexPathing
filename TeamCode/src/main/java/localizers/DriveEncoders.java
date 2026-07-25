@@ -84,22 +84,23 @@ public class DriveEncoders extends BaseLocalizer<DriveEncoders.Constants> {
         }
     }
 
-    public static class Constants extends BaseLocalizerConstants<Constants> {
-        public String frontLeftName = null;
-        public String frontRightName = null;
-        public String backLeftName = null;
-        public String backRightName = null;
-        public String imuName = null;
-        public RevHubOrientationOnRobot hubOrientation = null;
+    public static class Constants implements BaseLocalizerConstants<Constants> {
+        public String frontLeftName;
+        public String frontRightName;
+        public String backLeftName;
+        public String backRightName;
+        public String imuName;
+        public RevHubOrientationOnRobot hubOrientation;
         public double ticksPerInch = 1.0;
 
         @Override
         public BaseLocalizer<?> build(HardwareMap hardwareMap) {
             if (frontLeftName == null || frontRightName == null) {
                 throw new IllegalArgumentException(
-                        "You must call setFrontLeftName and setFrontRightName to set the names of the " +
-                                "motors that the encoders are attached to. For drivetrains that are " +
-                                "not 2 wheel tank, you must also call setBackLeftName and setBackRightName"
+                        "You must call setFrontLeftName and setFrontRightName to set the names " +
+                                "of the motors that the encoders are attached to. For " +
+                                "drivetrains that are not 2 wheel tank, you must also call " +
+                                "setBackLeftName and setBackRightName."
                 );
             }
 
@@ -110,9 +111,10 @@ public class DriveEncoders extends BaseLocalizer<DriveEncoders.Constants> {
             }
 
             if (this.hubOrientation == null) {
+                // noinspection ConstantExpression
                 throw new IllegalArgumentException(
-                        "You must call setHubOrientation to set the orientation of the control hub " +
-                                "on the robot."
+                        "You must call setHubOrientation to set the orientation of the control " +
+                                "hub on the robot."
                 );
             }
 
