@@ -58,7 +58,7 @@ public class Follower {
     private final double angularKA;
     private double centripetalGain;
     private double velocityFeedbackGain;
-    private double angularVelocityFeedbackGain
+    private double angularVelocityFeedbackGain;
 
     private FollowerMovement currentMovement ;
     private boolean paused = false;
