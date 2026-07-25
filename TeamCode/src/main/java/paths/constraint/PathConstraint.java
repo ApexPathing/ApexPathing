@@ -6,7 +6,7 @@ package paths.constraint;
  * @author DrPixelCat - 7842 alum
  */
 public interface PathConstraint {
-    enum ConstraintType {
+    enum Type {
         VELOCITY,
         ACCELERATION
     }
@@ -18,5 +18,5 @@ public interface PathConstraint {
     void setS(double s);
 
     /** @return The type of path constraint: VELOCITY, or ACCELERATION */
-    ConstraintType getType();
+    Type getType();
 }

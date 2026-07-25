@@ -13,7 +13,7 @@ import androidx.annotation.NonNull;
  *
  * @author DrPixelCat - 7842 alum
  */
-public class FeedforwardLut {
+public class FFLut {
     /** Ordered samples of the path-relative state [v, a, omega, alpha]. */
     private final MotionParameters[] params;
 
@@ -22,7 +22,7 @@ public class FeedforwardLut {
      *
      * @param generatedParams ordered motion profile samples
      */
-    public FeedforwardLut(MotionParameters[] generatedParams) {
+    public FFLut(MotionParameters[] generatedParams) {
         if (generatedParams == null || generatedParams.length == 0) {
             throw new IllegalArgumentException("A feedforward LUT requires at least one sample.");
         }
@@ -38,8 +38,8 @@ public class FeedforwardLut {
 
     /**
      * Returns an interpolated feedforward target at the requested progression.
-     * <p>
-     * Interpolation uses {@code y = y0 + fraction * (y1 - y0)}, where
+     *
+     * <p>Interpolation uses {@code y = y0 + fraction * (y1 - y0)}, where
      * {@code fraction = (progression - s0) / (s1 - s0)}. Each kinematic component is blended
      * independently. The fraction is derived from the requested displacement/progression; it is
      * not elapsed time or a path parameter.
@@ -47,15 +47,13 @@ public class FeedforwardLut {
      * @param progression path progression/distance key to query
      * @return interpolated motion parameters for the follower
      */
-    public MotionParameters getFeedforwardParams(double progression) {
+    public MotionParameters getFFParams(double progression) {
         if (params.length == 1 || progression <= params[0].getProgression()) {
             return copyOf(params[0]);
         }
 
         MotionParameters last = params[params.length - 1 ];
-        if (progression >= last.getProgression()) {
-            return copyOf(last);
-        }
+        if (progression >= last.getProgression()) { return copyOf(last); }
 
         // Find the first sample at or beyond the requested progression.
         for (int i = 1; i < params.length; i++) {
@@ -66,13 +64,10 @@ public class FeedforwardLut {
                 double s1 = params2.getProgression();
                 double denominator = s1 - s0;
 
-                if (Math.abs(denominator) < 1e-9) {
-                    return copyOf(params2);
-                }
+                if (Math.abs(denominator) < 1e-9) { return copyOf(params2); }
 
                 double interpolationFraction = (progression - s0) / denominator;
-                return getFeedforwardParams(
-                        params1, interpolationFraction, params2, progression);
+                return getFFParams(params1, interpolationFraction, params2, progression);
             }
         }
         return copyOf(last);
@@ -87,39 +82,27 @@ public class FeedforwardLut {
      * @return linearly interpolated parameters
      */
     @NonNull
-    private static MotionParameters getFeedforwardParams(MotionParameters params1,
-                                                         double interpolationFraction,
-                                                         MotionParameters params2,
-                                                         double progression) {
-        double interpTransVel =
-                params1.getTangentialVel() + interpolationFraction *
+    private static MotionParameters getFFParams(MotionParameters params1,
+                                                double interpolationFraction,
+                                                MotionParameters params2, double progression) {
+        double interpTransVel = params1.getTangentialVel() + interpolationFraction *
                         (params2.getTangentialVel() - params1.getTangentialVel());
-        double interpTransAccel =
-                params1.getTangentialAccel() + interpolationFraction *
+        double interpTransAccel = params1.getTangentialAccel() + interpolationFraction *
                         (params2.getTangentialAccel() - params1.getTangentialAccel());
-        double interpAngVel =
-                params1.getAngularVel() + interpolationFraction *
+        double interpAngVel = params1.getAngularVel() + interpolationFraction *
                         (params2.getAngularVel() - params1.getAngularVel());
-        double interpAngAccel =
-                params1.getAngularAccel() + interpolationFraction *
+        double interpAngAccel = params1.getAngularAccel() + interpolationFraction *
                         (params2.getAngularAccel() - params1.getAngularAccel());
 
         return new MotionParameters(
-                interpTransVel,
-                interpTransAccel,
-                interpAngVel,
-                interpAngAccel,
-                progression
+                interpTransVel, interpTransAccel, interpAngVel, interpAngAccel, progression
         );
     }
 
     private static MotionParameters copyOf(MotionParameters params) {
         return new MotionParameters(
-                params.getTangentialVel(),
-                params.getTangentialAccel(),
-                params.getAngularVel(),
-                params.getAngularAccel(),
-                params.getProgression()
+                params.getTangentialVel(), params.getTangentialAccel(), params.getAngularVel(),
+                params.getAngularAccel(), params.getProgression()
         );
     }
 }

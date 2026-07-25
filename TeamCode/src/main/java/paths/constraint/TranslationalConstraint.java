@@ -10,10 +10,10 @@ import geometry.Dist;
  */
 public class TranslationalConstraint implements PathConstraint {
     private double s;
-    private final ConstraintType type;
+    private final Type type;
     private final double value_in;
 
-    public TranslationalConstraint(double s, ConstraintType type, Dist value) {
+    public TranslationalConstraint(double s, Type type, Dist value) {
         this.s = s;
         this.type = type;
         this.value_in = value.getIn();
@@ -26,7 +26,8 @@ public class TranslationalConstraint implements PathConstraint {
     public void setS(double s) { this.s = s; }
 
     @Override
-    public ConstraintType getType() { return type; }
+    public Type getType() { return type; }
 
+    @SuppressWarnings("PublicMethodNotExposedInInterface")
     public double getValueIn() { return value_in; }
 }

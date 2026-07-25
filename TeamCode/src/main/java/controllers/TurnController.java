@@ -5,11 +5,9 @@ import feedforward.MotionParameters;
 /**
  * Executes quick and displacement-profiled point turns.
  *
- * <p>
- * Quick turns and overshoot recovery use the complete heading PDS controller. Normal profiled
+ * <p>Quick turns and overshoot recovery use the complete heading PDS controller. Normal profiled
  * motion deliberately uses only angular feedforward, the PDS controller's tuned static term, and
  * explicit angular velocity feedback.
- * </p>
  *
  * @author DrPixelCat - 7842 alum
  */
@@ -56,7 +54,7 @@ public class TurnController {
     public double calculateProfiled(double headingError, double intendedDirection,
                                     MotionParameters targets, double measuredAngularVelocity) {
         if (!overshootRecovery && intendedDirection != 0.0 &&
-                (intendedDirection * headingError) < -EPSILON) {
+                intendedDirection * headingError < -EPSILON) {
             overshootRecovery = true;
             headingPds.reset();
         }
@@ -67,14 +65,16 @@ public class TurnController {
 
         double targetVelocity = targets.getAngularVel();
         double targetAcceleration = targets.getAngularAccel();
-        double motionSign = Math.abs(targetVelocity) > EPSILON
-                ? Math.signum(targetVelocity)
-                : (Math.abs(targetAcceleration) > EPSILON
-                ? Math.signum(targetAcceleration) : 0.0);
 
-        double feedforward = (angularKV * targetVelocity)
-                + (angularKA * targetAcceleration)
-                + (headingPds.getCoefficients().kS * motionSign);
+        double motionSign = 0.0;
+        if (Math.abs(targetVelocity) > EPSILON) {
+            motionSign = Math.signum(targetVelocity);
+        } else if (Math.abs(targetAcceleration) > EPSILON) {
+            motionSign = Math.signum(targetAcceleration);
+        }
+
+        double feedforward = angularKV * targetVelocity + angularKA * targetAcceleration
+                + headingPds.getCoefficients().kS * motionSign;
         double velocityFeedback = angularVelocityFeedbackGain
                 * (targetVelocity - measuredAngularVelocity);
 

@@ -3,17 +3,13 @@ package drivetrains;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-import java.util.Objects;
-
 /**
  * Base class for all drivetrain controllers.
  *
- * <p>
- * This class handles motor initialization and provides common methods for driving and setting motor
- * powers. Specific drivetrain types (like Tank, Mecanum, etc.) should extend this class and
+ * <p>This class handles motor initialization and provides common methods for driving and setting
+ * motor powers. Specific drivetrain types (like Tank, Mecanum, etc.) should extend this class and
  * implement the moveWithVectors method to define how the drive, strafe, and turn vectors are
  * translated into motor powers.
- * </p>
  *
  * @param <T> the type of drivetrain configuration this drivetrain uses, which must extend
  *        {@link BaseDrivetrainConstants}
@@ -33,10 +29,11 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
     private final DrivetrainType drivetrainType;
     private final boolean isHolonomic;
 
-    // Note: front motors are guaranteed to be non-null, but rear motors may be null if not needed
+    /**
+     * Note: front motors are guaranteed to be non-null, but rear motors may be null if not needed
+     */
     protected DcMotorEx flMotor, frMotor, blMotor, brMotor;
 
-    // Power change deadzone to prevent unnecessary motor updates
     private static final double POWER_TOLERANCE = 0.005;
     private double lastFlPower, lastFrPower, lastBlPower, lastBrPower = 0.0;
 
@@ -44,29 +41,17 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
      * Your drivetrain class constructor should call this super constructor to initialize motors and
      * store the configuration.
      *
-     * @param constants your drivetrain configuration object that is a child of {@link BaseDrivetrainConstants}
+     * @param constants your drivetrain configuration object that is a child of
+     *                  {@link BaseDrivetrainConstants}
      * @param hardwareMap the hardware map to use for initializing motors
      */
     public BaseDrivetrain(T constants, HardwareMap hardwareMap, DrivetrainType drivetrainType) {
-        if (Objects.equals(constants.flMotorConfig.getName(), "defaultMotorName")) {
-            throw new IllegalArgumentException("Front left motor configuration is not set in the drivetrain constants.");
-        }
-        if (Objects.equals(constants.frMotorConfig.getName(), "defaultMotorName")) {
-            throw new IllegalArgumentException("Front right motor configuration is not set in the drivetrain constants.");
-        }
         flMotor = constants.flMotorConfig.build(hardwareMap);
         frMotor = constants.frMotorConfig.build(hardwareMap);
-
         if (constants.blMotorConfig != null) {
-            if (Objects.equals(constants.blMotorConfig.getName(), "defaultMotorName")) {
-                throw new IllegalArgumentException("Back left motor configuration is not set in the drivetrain constants.");
-            }
             blMotor = constants.blMotorConfig.build(hardwareMap);
         }
         if (constants.brMotorConfig != null) {
-            if (Objects.equals(constants.brMotorConfig.getName(), "defaultMotorName")) {
-                throw new IllegalArgumentException("Back right motor configuration is not set in the drivetrain constants.");
-            }
             brMotor = constants.brMotorConfig.build(hardwareMap);
         }
 
@@ -76,11 +61,10 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
     }
 
     /**
-     * Moves the robot using the provided drive, strafe, and turn vectors.
-     * The values are normalized and applied to the motors according to the mecanum drive formulas.
+     * Moves the robot using the provided drive, strafe, and turn vectors. The values are normalized
+     * and applied to the motors according to the mecanum drive formulas.
      *
-     * @param x the forward/backward movement vector (positive for forward, negative for
-     *          backward)
+     * @param x the forward/backward movement vector (positive for forward, negative for backward)
      * @param y the left/right movement vector (positive for left, negative for right)
      * @param turn the rotation vector (positive for counterclockwise, negative for clockwise)
      */
@@ -99,14 +83,14 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
      */
     public void drive(double x, double y, double turn, double robotHeadingRad) {
         double adjX, adjY;
-        if (!constants.robotCentric) { // Field centric
+        if (constants.robotCentric) {
+            adjX = x;
+            adjY = y;
+        } else { // Field centric
             double cos = Math.cos(-robotHeadingRad);
             double sin = Math.sin(-robotHeadingRad);
             adjX = x * cos - y * sin;
             adjY = x * sin + y * cos;
-        } else {
-            adjX = x;
-            adjY = y;
         }
         moveWithVectors(adjX, adjY, turn);
     }
@@ -122,15 +106,11 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
      */
     public void drive(double x, double y, double turn) { drive(x, y, turn, 0); }
 
-    /** @return the drivetrain type of this drivetrain */
-    public DrivetrainType getDrivetrainType() {
-        return drivetrainType;
-    }
+    /** @return the {@link DrivetrainType} of this drivetrain */
+    public DrivetrainType getDrivetrainType() { return drivetrainType; }
 
     /** @return Whether the drivetrain is currently in a holonomic state or not */
-    public boolean isHolonomic() {
-        return isHolonomic;
-    }
+    public boolean isHolonomic() { return isHolonomic; }
 
     /**
      * Sets the power for each drivetrain motor, applying limits from the configurations. If your
@@ -140,36 +120,39 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
         // Motor power limiting
         double max = Math.max(0, Math.abs(flPower));
         max = Math.max(max, Math.abs(frPower));
-        if (blMotor != null) max = Math.max(max, Math.abs(blPower));
-        if (brMotor != null) max = Math.max(max, Math.abs(brPower));
+        if (blMotor != null) { max = Math.max(max, Math.abs(blPower)); }
+        if (brMotor != null) { max = Math.max(max, Math.abs(brPower)); }
+
+        double newFlPower = flPower;
+        double newFrPower = frPower;
+        double newBlPower = blPower;
+        double newBrPower = brPower;
         if (max > constants.maxPower) {
-            flPower = (flPower / max) * constants.maxPower;
-            frPower = (frPower / max) * constants.maxPower;
-            if (blMotor != null) blPower = (blPower / max) * constants.maxPower;
-            if (brMotor != null) brPower = (brPower / max) * constants.maxPower;
+            newFlPower = flPower / max * constants.maxPower;
+            newFrPower = frPower / max * constants.maxPower;
+            if (blMotor != null) { newBlPower = blPower / max * constants.maxPower; }
+            if (brMotor != null) { newBrPower = brPower / max * constants.maxPower; }
         }
 
         // Write to motors only if the change exceeds the tolerance
-        if (Math.abs(flPower - lastFlPower) > POWER_TOLERANCE) {
-            flMotor.setPower(flPower);
-            lastFlPower = flPower;
+        if (Math.abs(newFlPower - lastFlPower) > POWER_TOLERANCE) {
+            flMotor.setPower(newFlPower);
+            lastFlPower = newFlPower;
         }
-        if (Math.abs(frPower - lastFrPower) > POWER_TOLERANCE) {
-            frMotor.setPower(frPower);
-            lastFrPower = frPower;
+        if (Math.abs(newFlPower - lastFrPower) > POWER_TOLERANCE) {
+            frMotor.setPower(newFrPower);
+            lastFrPower = newFrPower;
         }
-        if (blMotor != null && Math.abs(blPower - lastBlPower) > POWER_TOLERANCE) {
-            blMotor.setPower(blPower);
-            lastBlPower = blPower;
+        if (blMotor != null && Math.abs(newBlPower - lastBlPower) > POWER_TOLERANCE) {
+            blMotor.setPower(newBlPower);
+            lastBlPower = newBlPower;
         }
-        if (brMotor != null && Math.abs(brPower - lastBrPower) > POWER_TOLERANCE) {
-            brMotor.setPower(brPower);
-            lastBrPower = brPower;
+        if (brMotor != null && Math.abs(newBrPower - lastBrPower) > POWER_TOLERANCE) {
+            brMotor.setPower(newBrPower);
+            lastBrPower = newBrPower;
         }
     }
 
-    /**
-     * Stop all drivetrain actuators
-     */
+    /** Stop all drivetrain actuators */
     public void stop() { setPowers(0, 0, 0, 0); }
 }

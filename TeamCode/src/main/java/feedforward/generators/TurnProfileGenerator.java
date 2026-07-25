@@ -1,45 +1,35 @@
 package feedforward.generators;
 
 import core.FollowerConstants;
-import feedforward.FeedforwardLut;
+import feedforward.FFLut;
 import feedforward.MotionParameters;
 import paths.movements.Turn;
 
 /**
  * Generates a one-dimensional angular profile for point turns.
  *
- * <p>
- * A turn does not move along a path, so the profile only fills {@code omega} and
+ * <p>A turn does not move along a path, so the profile only fills {@code omega} and
  * {@code alpha}-related limits. The same LUT type is used so the follower can query turns and
  * paths through the same feedforward interface.
- * </p>
  *
  * @author DrPixelCat - 7842 alum
  */
 public class TurnProfileGenerator {
-    private static final double EPSILON = 1e-9;
+    private static final double EPSILON = 1e-6;
+
+    private final double angularKV;
+    private final double angularKA;
+    private final double headingKS;
 
     /** Maximum angular velocity allowed for the turn, in radians per second. */
     private double omega_max;
     /** Maximum angular acceleration allowed for the turn, in radians per second squared. */
     private double alpha_max;
-    private final double angularKV;
-    private final double angularKA;
-    private final double headingKS;
-    /**
-     * Creates a turn profile generator with angular limits.
-     *
-     * @param omega_max maximum angular velocity
-     * @param alpha_max maximum angular acceleration
-     */
-    public TurnProfileGenerator(double omega_max, double alpha_max) {
-        this(omega_max, alpha_max, FollowerConstants.getInstance());
-    }
 
     /** Creates a generator from one explicit follower-configuration source. */
-    public TurnProfileGenerator(double omega_max, double alpha_max, FollowerConstants config) {
-        this(omega_max, alpha_max, config.angularKV, config.angularKA,
-                config.headingCoeffs.kS);
+    public TurnProfileGenerator(double omega_max, double alpha_max, FollowerConstants constants) {
+        this(omega_max, alpha_max, constants.angularKV, constants.angularKA,
+                constants.headingCoeffs.kS);
     }
 
     /**
@@ -60,9 +50,7 @@ public class TurnProfileGenerator {
         this.headingKS = headingKS;
     }
 
-    /**
-     * Updates the angular limits without allocating a new generator.
-     */
+    /** Updates the angular limits without allocating a new generator.*/
     public void setConstraints(double omega_max, double alpha_max) {
         validateConstraints(omega_max, alpha_max);
         this.omega_max = omega_max;
@@ -71,23 +59,22 @@ public class TurnProfileGenerator {
 
     /**
      * Builds a trapezoidal-ish angular profile for the requested turn.
-     * <p>
-     * The pass structure mirrors the path generator: start with max velocity, sweep backward to
+     *
+     * <p>The pass structure mirrors the path generator: start with max velocity, sweep backward to
      * make sure the profile can stop, then sweep forward to make sure it can accelerate from rest.
      *
      * @param turn turn movement to profile
      * @return feedforward LUT containing angular velocity targets
      */
-    public FeedforwardLut generate(Turn turn) {
+    public FFLut generate(Turn turn) {
         double signedTurn = turn.getStartPose().getHeading()
                 .getShortestAngleTo(turn.getEndPose().getHeading()).getRad();
-        double direction = Math.signum(signedTurn);
         double turnLengthRads = Math.abs(signedTurn);
 
         if (turnLengthRads < 1e-9) {
             MotionParameters stationary = new MotionParameters();
             stationary.setDistAlongCurve(0.0);
-            return new FeedforwardLut(new MotionParameters[]{stationary});
+            return new FFLut(new MotionParameters[]{stationary});
         }
 
         // Define structural bounds and target density (~2 degrees per step index)
@@ -130,24 +117,26 @@ public class TurnProfileGenerator {
             double prevW = lut[i - 1].getAngularVel();
             double availableAcceleration = getMaxForwardAcceleration(prevW);
             double maxReachableW =
-                    Math.sqrt((prevW * prevW) + (2.0 * availableAcceleration * ds));
+                    Math.sqrt(prevW * prevW + 2.0 * availableAcceleration * ds);
             lut[i].setAngularVel(Math.min(lut[i].getAngularVel(), maxReachableW));
         }
 
         // Convert the scalar profile into signed angular states. Acceleration belongs to the
         // segment beginning at each sample so the first row can command the turn from rest.
+        double direction = Math.signum(signedTurn);
         for (int i = 0; i < steps - 1; i++) {
             double currentW = lut[i].getAngularVel();
             double nextW = lut[i + 1].getAngularVel();
-            double acceleration = ((nextW * nextW) - (currentW * currentW)) /
-                    (2.0 * ds);
             lut[i].setAngularVel(direction * currentW);
+
+            double acceleration = (nextW * nextW - currentW * currentW) /
+                    (2.0 * ds);
             lut[i].setAngularAccel(direction * acceleration);
         }
         lut[steps - 1].setAngularVel(0.0);
         lut[steps - 1].setAngularAccel(0.0);
 
-        return new FeedforwardLut(lut);
+        return new FFLut(lut);
     }
 
     private static void validateConstraints(double omegaMax, double alphaMax) {
@@ -171,19 +160,14 @@ public class TurnProfileGenerator {
     }
 
     private double getPowerLimitedVelocity(double configuredLimit) {
-        if (angularKV <= EPSILON) {
-            return configuredLimit;
-        }
+        if (angularKV <= EPSILON) { return configuredLimit; }
         return Math.min(configuredLimit, Math.max(0.0, (1.0 - headingKS) / angularKV));
     }
 
     /** Solves kV*w + kA*a + kS <= 1 for positive acceleration. */
     private double getMaxForwardAcceleration(double angularVelocity) {
-        if (angularKA <= EPSILON) {
-            return alpha_max;
-        }
-        double powerLimited =
-                (1.0 - headingKS - (angularKV * angularVelocity)) / angularKA;
+        if (angularKA <= EPSILON) { return alpha_max; }
+        double powerLimited = (1.0 - headingKS - angularKV * angularVelocity) / angularKA;
         return Math.min(alpha_max, Math.max(0.0, powerLimited));
     }
 
@@ -193,26 +177,20 @@ public class TurnProfileGenerator {
      * <p>The kinematic limit is {@code w^2 = wNext^2 + 2 * alphaMax * ds}. The motor-power
      * limit follows from substituting that required deceleration into
      * {@code -1 <= kV*w - kA*d + kS}. This is a quadratic in {@code w}, so a search is neither
-     * necessary nor desirable.</p>
+     * necessary nor desirable.
      */
     private double getMaxPreviousVelocity(double nextVelocity, double ds,
                                           double velocityLimit) {
-        double kinematicLimit = Math.sqrt(
-                (nextVelocity * nextVelocity) + (2.0 * alpha_max * ds));
+        double kinematicLimit = Math.sqrt(nextVelocity * nextVelocity + 2.0 * alpha_max * ds);
         double reachableVelocity = Math.min(velocityLimit, kinematicLimit);
 
         // With no acceleration feedforward term, braking does not consume modeled voltage.
-        if (angularKA <= EPSILON) {
-            return reachableVelocity;
-        }
+        if (angularKA <= EPSILON) { return reachableVelocity; }
 
         double dsKV = ds * angularKV;
-        double radicand =
-                (dsKV * dsKV)
-                        + (angularKA * angularKA * nextVelocity * nextVelocity)
-                        + (2.0 * angularKA * ds * (1.0 + headingKS));
-        double powerLimitedVelocity =
-                (dsKV + Math.sqrt(Math.max(0.0, radicand))) / angularKA;
+        double radicand = dsKV * dsKV + angularKA * angularKA * nextVelocity * nextVelocity + 2.0 *
+                angularKA * ds * (1.0 + headingKS);
+        double powerLimitedVelocity = (dsKV + Math.sqrt(Math.max(0.0, radicand))) / angularKA;
 
         return Math.min(reachableVelocity, powerLimitedVelocity);
     }

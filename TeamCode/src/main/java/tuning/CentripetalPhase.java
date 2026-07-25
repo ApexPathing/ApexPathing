@@ -83,7 +83,8 @@ public class CentripetalPhase extends TuningPhase {
         if (context.getFollower().isBusy()) {
             sampleError();
             return false;
-        } else if (forwardPathRunning) {
+        }
+        if (forwardPathRunning) {
             forwardPathRunning = false;
             context.getFollower().follow(backwardArc);
             return false;

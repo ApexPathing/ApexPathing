@@ -15,7 +15,7 @@ import geometry.Pose;
  * @author Sohum Arora - 22985 Paraducks
  */
 public class PDSRoutine {
-    enum TuningAxis {
+    enum Axis {
         DRIVE,
         STRAFE,
         HEADING
@@ -34,7 +34,7 @@ public class PDSRoutine {
     private static final double SETTLING_TIME = 750;
     private static final double TUNING_TIME = 2000;
 
-    private final TuningAxis axis;
+    private final Axis axis;
     private final ElapsedTime timer = new ElapsedTime();
     private final PDSController controller;
     private final BinarySearch search;
@@ -46,16 +46,16 @@ public class PDSRoutine {
     private double velocityAtMaxAcceleration;
     private double maxAccelerationTime;
 
-    PDSRoutine(TunerContext context, TuningAxis axis) {
+    PDSRoutine(TunerContext context, Axis axis) {
         search = new BinarySearch(0.0, 0.4, 0.01);
         this.axis = axis;
         context.getFollower().disableControllers();
         context.getFollower().setPose(Pose.zero());
         controller = new PDSController(new PDSCoefficients());
-        if (axis == TuningAxis.HEADING) {
+        if (axis == Axis.HEADING) {
             controller.setAngularController();
         }
-        threshold = axis == TuningAxis.HEADING ? HEADING_THRESHOLD : MOVEMENT_THRESHOLD;
+        threshold = axis == Axis.HEADING ? HEADING_THRESHOLD : MOVEMENT_THRESHOLD;
     }
 
     void start() {
@@ -91,6 +91,7 @@ public class PDSRoutine {
         }
     }
 
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     boolean update(TunerContext context) {
         switch (state) {
             case TUNING_KS:

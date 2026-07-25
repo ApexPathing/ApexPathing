@@ -6,7 +6,6 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import core.Follower;
 import geometry.GeometryFactory;
 import geometry.Pose;
-import paths.ExampleAutoPath;
 
 /**
  * Test autonomous OpMode for Apex Pathing that uses the {@link ExampleAutoPath}. Make sure the

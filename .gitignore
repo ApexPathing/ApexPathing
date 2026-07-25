@@ -41,7 +41,9 @@ captures/
 
 # IntelliJ
 *.iml
-.idea/
+/.idea/*
+!/.idea/inspectionProfiles/
+!/.idea/codeStyles/
 
 # For Mac users
 .DS_Store

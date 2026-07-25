@@ -9,7 +9,7 @@ import androidx.annotation.NonNull;
  *
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
-public final class Angle {
+public class Angle {
     private final double radians;
 
     // region Constructors and factory methods
@@ -42,8 +42,8 @@ public final class Angle {
     /** @return the angle in radians. */
     public double getRad() { return this.radians; }
 
-    /** Checks if the angle is finite (not NaN or infinite). */
-    public boolean isFinite() { return Double.isFinite(this.radians); }
+    /** Checks if the angle is not finite (NaN or infinite). */
+    public boolean isNotFinite() { return !Double.isFinite(this.radians); }
 
     // endregion
     // region Arithmetic operations
@@ -71,11 +71,8 @@ public final class Angle {
 
     /** Normalizes an angle in radians to the range [0, 2π]. */
     public static double normalize(double radians) {
-        return (radians % (2 * Math.PI) + (2 * Math.PI)) % (2 * Math.PI);
+        return (radians % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
     }
-
-    /** @return a new Angle that is normalized to [0, 2π] radians */
-    public Angle normalized() { return new Angle(normalize(this.radians)); }
 
     /** @return the given angle wrapped in radians to the range [-PI, PI]. */
     public static double wrap(double radians) {
@@ -85,9 +82,6 @@ public final class Angle {
         }
         return wrapped;
     }
-
-    /** @return a new Angle that is wrapped to [-π, π) radians */
-    public Angle wrapped() { return new Angle(wrap(this.radians)); }
 
     /** @return a copy of this Angle */
     public Angle copy() { return new Angle(this.radians); }

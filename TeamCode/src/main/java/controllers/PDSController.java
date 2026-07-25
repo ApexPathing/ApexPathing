@@ -13,20 +13,16 @@ import geometry.Angle;
  * static forces)</li>
  * </ul>
  *
- * <p>
- * The controller uses a soft sign function to smooth the kS term, which helps prevent
+ * <p>The controller uses a soft sign function to smooth the kS term, which helps prevent
  * overshooting and oscillation.
- * </p>
  *
- * <p>
- * Special thanks to Wolfpack Machina (18438) for inspiration for this controller
- * </p>
+ * <p>Special thanks to Wolfpack Machina (18438) for inspiration for this controller
  *
  * @author Dylan B. - 18597 RoboClovers - Delta
  * @author DrPixelCat - 7842 alum
  */
 public class PDSController {
-    // TODO: I checked these on Desmos and it looks good, but they might need to be changed
+    /** TODO: I checked these on Desmos and it looks good, but they might need to be changed */
     public static final double LINEAR_SMOOTHING_CONSTANT = 0.7; // In
     public static final double ANGULAR_SMOOTHING_CONSTANT = 0.07; // Rad
     private double smoothingConstant = LINEAR_SMOOTHING_CONSTANT;

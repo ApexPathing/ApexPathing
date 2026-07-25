@@ -3,7 +3,7 @@ package paths.movements;
 import java.util.ArrayList;
 import java.util.List;
 
-import feedforward.FeedforwardLut;
+import feedforward.FFLut;
 import geometry.Angle;
 import geometry.Pose;
 import paths.Callback;
@@ -17,9 +17,8 @@ import paths.Callback;
  */
 public class Turn extends FollowerMovement {
     private final Pose startPose;
-    private final Pose endPose;
-    private FeedforwardLut feedforwardLut = null;
-    private final List<Callback> callbacks = new ArrayList<>();
+    private FFLut FFLut;
+    private final List<Callback> callbacks = new ArrayList<Callback>();
 
     /**
      * Constructs a Turn movement.
@@ -29,7 +28,6 @@ public class Turn extends FollowerMovement {
      */
     public Turn(Pose startPose, Angle targetHeading) {
         this.startPose = startPose;
-        // The end factory shares the same X/Y, but updates the heading
         this.endPose = new Pose(startPose.getVec(), targetHeading);
     }
 
@@ -39,12 +37,7 @@ public class Turn extends FollowerMovement {
 
     public Pose getStartPose() { return startPose; }
 
-    public FeedforwardLut getFeedforwardLut() { return feedforwardLut; }
+    public FFLut getFeedforwardLut() { return FFLut; }
 
-    public void setFeedforwardLut(FeedforwardLut feedforwardLut) {
-        this.feedforwardLut = feedforwardLut;
-    }
-
-    @Override
-    public Pose getEndPose() { return endPose; }
+    public void setFeedforwardLut(FFLut FFLut) { this.FFLut = FFLut; }
 }

@@ -11,6 +11,7 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
  * @author Sohum Arora - 22985 Paraducks
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
+@SuppressWarnings("ClassNamePrefixedWithPackageName")
 public abstract class TuningPhase {
     enum TuningState {
         SELECT_MODE,
@@ -22,7 +23,6 @@ public abstract class TuningPhase {
     protected LinearOpMode opMode;
     protected boolean manualMode;
     protected double increment;
-
 
     protected TuningPhase(TunerContext context) { this.context = context; }
 
@@ -104,7 +104,6 @@ public abstract class TuningPhase {
         }
         return 0.0;
     }
-
 
     protected abstract String getPhaseName();
 
