@@ -53,11 +53,14 @@ public class DriveController {
         boolean invalidLimits = !Double.isFinite(forwardVelocity) || forwardVelocity <= 0.0 ||
                 !Double.isFinite(strafeVelocity) || strafeVelocity <= 0.0;
 
+        // TODO: Re-enable this once we figure out a good way to not require mecanum limits when its untuned
+        /*
         if (requireMecanumLimits && invalidLimits) {
             throw new IllegalArgumentException(
                     "Mecanum forward and strafe velocity limits must both be positive."
             );
         }
+        */
 
         strafePenaltyRatio = invalidLimits ? 1.0 : forwardVelocity / strafeVelocity;
     }
