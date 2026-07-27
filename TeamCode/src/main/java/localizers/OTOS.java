@@ -190,7 +190,7 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
 
         private Pose pose, velocity, acceleration;
 
-        private Driver(I2cDeviceSynch deviceClient) {
+        public Driver(I2cDeviceSynch deviceClient) {
             super(deviceClient, true);
             deviceClient.setI2cAddress(I2cAddr.create7bit(DEFAULT_ADDRESS));
             super.registerArmingStateCallback(false);
