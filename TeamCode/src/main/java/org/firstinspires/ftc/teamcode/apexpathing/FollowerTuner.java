@@ -33,7 +33,7 @@ public class FollowerTuner extends LinearOpMode {
         HEADING(HeadingPhase.class, (FollowerConstants constants) ->
                 constants.headingCoeffs.kP != 0.0),
         LIMITS(LimitsPhase.class, (FollowerConstants constants) ->
-                constants.translationalCoeffs.kP != 0.0),
+                constants.angular.KA != 0.0),
         DRIVE(DrivePhase.class, (FollowerConstants constants) ->
                 constants.translationalCoeffs.kP != 0.0),
         CENTRIPETAL(CentripetalPhase.class, (FollowerConstants constants) ->
@@ -95,7 +95,7 @@ public class FollowerTuner extends LinearOpMode {
     /** Loops through phases before the given phase to check if they have been tuned or not. */
     private boolean phaseAvailable(Phase phase) {
         for (int i = 0; i < phase.ordinal(); i++) {
-            if (phases[i].tuned) {
+            if (!phases[i].tuned) {
                 return false;
             }
         }
@@ -131,7 +131,7 @@ public class FollowerTuner extends LinearOpMode {
 
         if (gamepad1.dpadUpWasPressed()) {
             do {
-                selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() - 1) % phaseAmount];
+                selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() - 1 + phaseAmount) % phaseAmount];
             } while (!phaseAvailable(selectedPhaseOrdinal));
         } else if (gamepad1.dpadDownWasPressed()) {
             do {
