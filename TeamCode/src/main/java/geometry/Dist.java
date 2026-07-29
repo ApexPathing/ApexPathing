@@ -9,7 +9,7 @@ import androidx.annotation.NonNull;
  *
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
-public final class Dist {
+public class Dist {
     private final double inches;
 
     // region Constructors and factory methods

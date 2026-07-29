@@ -7,6 +7,7 @@ import com.qualcomm.robotcore.util.Range;
 import controllers.DriveController;
 import controllers.DriveController.AllocatedCommand;
 import controllers.TurnController;
+import controllers.PDSController.PDSCoefficients;
 import controllers.PDSController;
 import drivetrains.BaseDrivetrain;
 import drivetrains.BaseDrivetrainConstants;
@@ -47,31 +48,33 @@ public class Follower {
 
     private double lastS = -1.0;
     private long lastNano = -1;
-    private Angle lastHeading = null; // Tracks heading between ticks for angular callback sweeps
-    private Pose lastPose = null;
+    private Angle lastHeading; // Tracks heading between ticks for angular callback sweeps
+    private Pose lastPose;
 
     private final PDSController headingController;
     private final TurnController turnController;
     private final DriveController driveController;
-    private double translationalKV;
-    private double translationalKA;
-    private double angularKV;
-    private double angularKA;
+    private final double translationalKV;
+    private final double translationalKA;
+    private final double angularKV;
+    private final double angularKA;
     private double centripetalGain;
     private double velocityFeedbackGain;
     private double angularVelocityFeedbackGain;
 
-    private FollowerMovement currentMovement = null;
+    private FollowerMovement currentMovement ;
     private boolean paused = false;
 
     private boolean headingControllerEnabled = true;
     private boolean driveControllerEnabled = true;
 
-    PathSegment segment;
-    Angle targetHeading;
-    Vector targetTurnPoseVec;
-    double turnDirection;
-    double turnTotalDisplacement;
+    private PathSegment segment;
+    private Angle targetHeading;
+    private Vector targetTurnPoseVec;
+    private double turnDirection;
+    private double turnTotalDisplacement;
+    private double crossTrackError;
+    private double t;
 
     /** Constructs the drivetrain, localizer, and follower from the given {@link ApexConstants}. */
     public Follower(ApexConstants constants, HardwareMap hardwareMap) {
@@ -92,7 +95,7 @@ public class Follower {
         this.translationalKA = this.constants.translationalKA;
         this.angularKV = this.constants.angularKV;
         this.angularKA = this.constants.angularKA;
-        this.centripetalGain = this.constants.Kcentripetal;
+        this.centripetalGain = this.constants.kCentripetal;
         this.velocityFeedbackGain = this.constants.velocityFeedbackGain;
         this.angularVelocityFeedbackGain = this.constants.angularVelocityFeedbackGain;
 
@@ -100,19 +103,13 @@ public class Follower {
         this.headingController.setAngularController();
 
         this.turnController = new TurnController(
-                this.constants.headingCoeffs,
-                angularKV,
-                angularKA,
-                angularVelocityFeedbackGain
+                this.constants.headingCoeffs, angularKV, angularKA, angularVelocityFeedbackGain
         );
-
-        boolean requireMecanumLimits = !tuningMode &&
-                (drivetrain instanceof Mecanum || drivetrain instanceof DualActuated);
         this.driveController = new DriveController(
                 Dist.fromIn(this.constants.forwardVelLimitIn),
                 Dist.fromIn(this.constants.strafeVelLimitIn),
                 this.constants.translationalCoeffs,
-                requireMecanumLimits
+                !tuningMode && (drivetrain instanceof Mecanum || drivetrain instanceof DualActuated)
         );
     }
 
@@ -135,7 +132,7 @@ public class Follower {
 
         if (callbacks != null) {
             for (Callback cb : callbacks) {
-                if (cb.isTriggered()) continue;
+                if (cb.isTriggered()) { continue; }
 
                 boolean shouldTrigger = false;
 
@@ -159,7 +156,8 @@ public class Follower {
 
                         // If sweeps are in the same direction AND the tick sweep is larger, it
                         // was crossed
-                        if (Math.signum(tickSweep) == Math.signum(targetSweep) && Math.abs(targetSweep) <= Math.abs(tickSweep)) {
+                        if (Math.signum(tickSweep) == Math.signum(targetSweep) &&
+                                Math.abs(targetSweep) <= Math.abs(tickSweep)) {
                             shouldTrigger = true;
                         }
                     }
@@ -175,7 +173,7 @@ public class Follower {
     }
 
     private HolonomicDriveModel getActiveHolonomicDriveModel() {
-        if (drivetrain instanceof Mecanum) return HolonomicDriveModel.ANISOTROPIC;
+        if (drivetrain instanceof Mecanum) { return HolonomicDriveModel.ANISOTROPIC; }
         if (drivetrain instanceof DualActuated) {
             if (!drivetrain.isHolonomic()) {
                 throw new IllegalStateException(
@@ -202,42 +200,54 @@ public class Follower {
         return driveController.allocateIsotropic(fieldCommand, currentHeading, availablePower);
     }
 
-    // region ========Update=========
+    // endregion
+    // Public methods
+
+    /**
+     * The main execution loop of the follower.
+     * Must be called continuously during the active OpMode loop to drive the robot along the path.
+     */
+    public void update() {
+        update(false);
+    }
 
     /**
      * The main execution loop of the follower.
      * Must be called continuously during the active OpMode loop to drive the robot along the path.
      *
-     * @param holdPose Determines whether the robot should hold its pose or not after each movement.
-     *                 This can be toggled at any time.
+     * @param holdPose whether to hold the most recently commanded end pose when idle
      */
     public void update(boolean holdPose) {
         localizer.update();
 
-        // Exit early if nothing is running or if paused
+        // Exit early if nothing is running or if paused.
         if (currentMovement == null || paused) {
             if (holdPose && lastPose != null) {
                 double angularResponse = headingController.calculate(
                         lastPose.getHeading(AngleUnit.RAD) - getPose().getHeading(AngleUnit.RAD)
                 );
-                Vector transResponse;
+                Vector translationalResponse;
                 if (drivetrain.isHolonomic()) {
-                    transResponse = driveController.calculatePointToPoint(
+                    translationalResponse = driveController.calculatePointToPoint(
                             lastPose.getVec(), getPose().getVec()
                     );
                 } else {
                     Vector globalError = lastPose.getVec().minus(getPose().getVec());
-                    Vector localError = globalError.rotate(lastPose.getHeading().times(-1.0));
-                    double forwardErr = localError.getX(DistUnit.IN);
-                    transResponse = new Vector(
-                            Dist.fromIn(driveController.calculateEndDistance(forwardErr)),
+                    Vector localError =
+                            globalError.rotate(lastPose.getHeading().times(-1.0));
+                    double forwardError = localError.getX(DistUnit.IN);
+                    translationalResponse = new Vector(
+                            Dist.fromIn(driveController.calculateEndDistance(forwardError)),
                             Dist.zero()
                     );
                 }
                 drivetrain.drive(
-                        transResponse.getX().getIn(), transResponse.getY().getIn(), angularResponse);
+                        translationalResponse.getX().getIn(),
+                        translationalResponse.getY().getIn(),
+                        angularResponse
+                );
             } else {
-                this.stop();
+                drivetrain.stop();
             }
             return;
         }
@@ -277,7 +287,7 @@ public class Follower {
                 double angularDisplacement = Range.clip(
                         signedTravel, 0.0, turnTotalDisplacement);
                 MotionParameters turnTargets = turn.getFeedforwardLut()
-                        .getFeedforwardParams(angularDisplacement);
+                        .getFFParams(angularDisplacement);
                 totalTurnPower = turnController.calculateProfiled(
                         headingError,
                         turnDirection,
@@ -307,17 +317,11 @@ public class Follower {
             }
 
         } else if (segment == null) {
-            if (holdPose) {
-                if (drivetrain.isHolonomic()) {
-
-                }
-            } else {
-                this.stop();
-            }
+            this.stop();
             // region Holonomic Following
         } else if (drivetrain.isHolonomic()) {
             // Retrieve path geometry at closest point
-            double t = segment.getBestT(currentPos);
+            t = segment.getBestT(currentPos);
 
             Vector targetPoseVec = segment.getPosition(t);
             double s = segment.getDistanceToEndIn(targetPoseVec, t);
@@ -339,7 +343,7 @@ public class Follower {
             boolean isProfiled = path.isProfiled();
             double distanceTraveled = path.getParametricPath().getLengthIn() - s;
             MotionParameters targets = isProfiled ?
-                    path.getFeedforwardLut().getFeedforwardParams(distanceTraveled) : null;
+                    path.getFeedforwardLut().getFFParams(distanceTraveled) : null;
 
             HolonomicDriveModel driveModel = getActiveHolonomicDriveModel();
 
@@ -356,10 +360,10 @@ public class Follower {
             double headingFF = 0.0;
             if (isProfiled) {
                 double omegaTarget = fPrime * robotTangentialVel;
-                double alphaTarget = (fDoublePrime * (robotTangentialVel * robotTangentialVel)) +
-                        (fPrime * targets.getTangentialAccel());
+                double alphaTarget = fDoublePrime * (robotTangentialVel * robotTangentialVel) +
+                        fPrime * targets.getTangentialAccel();
 
-                headingFF = (omegaTarget * angularKV) + (alphaTarget * angularKA);
+                headingFF = omegaTarget * angularKV + alphaTarget * angularKA;
                 if (Math.abs(omegaTarget) > 1e-6) {
                     headingFF += Math.signum(omegaTarget) * constants.headingCoeffs.kS;
                 }
@@ -369,20 +373,20 @@ public class Follower {
                     ? headingController.calculate(
                     headingTarg.getRad() - currentHeading.getRad()) : 0.0;
             double turnPow = Range.clip(headingFeedback + headingFF, -1.0, 1.0);
-            double availableMotorPower = 1.0 - Math.abs(turnPow);
 
             // Calculate lateral cross track power allocation
             Vector positionalError = targetPoseVec.minus(currentPos);
-            double crossTrackError = positionalError.dot(normal).getIn();
+            crossTrackError = positionalError.dot(normal).getIn();
             double lateralFeedbackMag = driveControllerEnabled
                     ? driveController.calculateCrossTrack(crossTrackError) : 0.0;
 
-            double requiredLateralAccel = (robotTangentialVel * robotTangentialVel) * kappa;
+            double requiredLateralAccel = robotTangentialVel * robotTangentialVel * kappa;
             double centripetalMag = requiredLateralAccel * centripetalGain;
 
             Vector requestedLateralField = normal.times(
                     centripetalMag + lateralFeedbackMag
             );
+            double availableMotorPower = 1.0 - Math.abs(turnPow);
             AllocatedCommand lateralCommand = allocateHolonomicStage(
                     requestedLateralField,
                     currentHeading,
@@ -395,7 +399,7 @@ public class Follower {
             double tangentBudget;
             if (driveModel == HolonomicDriveModel.ISOTROPIC) {
                 tangentBudget = Math.sqrt(Math.max(0.0,
-                        (availableMotorPower * availableMotorPower) -
+                        availableMotorPower * availableMotorPower -
                                 Math.pow(lateralCommand.getPowerDemand(), 2)));
             } else {
                 tangentBudget = Math.max(0.0,
@@ -405,13 +409,14 @@ public class Follower {
             double totalTangentPower;
             if (t < 1.0) {
                 if (isProfiled) {
-                    double feedforward = (translationalKV * targets.getTangentialVel()) +
-                            (translationalKA * targets.getTangentialAccel()) +
-                            (Math.signum(targets.getTangentialVel()) * constants.translationalCoeffs.kS);
+                    double feedforward = translationalKV * targets.getTangentialVel() +
+                            translationalKA * targets.getTangentialAccel() +
+                            Math.signum(targets.getTangentialVel()) *
+                                    constants.translationalCoeffs.kS;
 
                     // TODO: Verify p only feedback performance, compare to SquID
-                    totalTangentPower = ((targets.getTangentialVel() - robotTangentialVel) *
-                            velocityFeedbackGain) + feedforward;
+                    totalTangentPower = (targets.getTangentialVel() - robotTangentialVel) *
+                            velocityFeedbackGain + feedforward;
 
                     if (path.isAccelBoosted()) {
                         totalTangentPower = Math.min(
@@ -419,16 +424,15 @@ public class Follower {
                                 driveController.calculateEndDistance(distanceRemaining));
                     }
                 } else {
-                    double decelPower =
-                            driveController.calculateEndDistance(distanceRemaining);
-                    double percentage = 1.0 - (s / path.getParametricPath().getLengthIn());
+                    double decelPower = driveController.calculateEndDistance(distanceRemaining);
+                    double percentage = 1.0 - s / path.getParametricPath().getLengthIn();
                     double percentageClipped = Math.min(Math.max(percentage, 0.0), 1.0);
                     double maxVel = path.getQuickVelocityLimit(percentageClipped,
                             constants.forwardVelLimitIn);
                     double velError = maxVel - robotTangentialVel;
-                    double accelPower = (maxVel * translationalKV)
-                            + (Math.signum(maxVel) * constants.translationalCoeffs.kS)
-                            + (velError * velocityFeedbackGain);
+                    double accelPower = maxVel * translationalKV
+                            + Math.signum(maxVel) * constants.translationalCoeffs.kS
+                            + velError * velocityFeedbackGain;
                     totalTangentPower = Math.min(accelPower, decelPower);
                 }
             } else {
@@ -460,7 +464,7 @@ public class Follower {
             // region Tank Following
         } else {
             // Process tank driving via Ramsete controller
-            double t = segment.getBestT(currentPos);
+            t = segment.getBestT(currentPos);
             Vector targetPoseVec = segment.getPosition(t);
             double s = segment.getDistanceToEndIn(targetPoseVec, t);
 
@@ -475,7 +479,7 @@ public class Follower {
                     segment.getFirstDerivative(1.0));
             double distanceTraveled = path.getParametricPath().getLengthIn() - s;
             MotionParameters targets =
-                    path.getFeedforwardLut().getFeedforwardParams(distanceTraveled);
+                    path.getFeedforwardLut().getFFParams(distanceTraveled);
 
             double v_d = targets.getTangentialVel();
             double a_d = targets.getTangentialAccel();
@@ -494,16 +498,16 @@ public class Follower {
             double b = 2.0;
             double zeta = 0.7;
             double k = 2.0 * zeta * Math.sqrt(Math.pow(omega_d, 2) + b * Math.pow(v_d, 2));
-            double sinc = (Math.abs(e_theta) < 1e-6) ? 1.0 : (Math.sin(e_theta) / e_theta);
+            double sinc = (Math.abs(e_theta) < 1e-6) ? 1.0 : Math.sin(e_theta) / e_theta;
 
             double v_cmd = v_d * Math.cos(e_theta) + k * e_x;
             double w_cmd = omega_d + k * e_theta + b * v_d * sinc * e_y;
 
             // Convert velocity commands to motor power using feedforward constants
-            double totalTangentPower = (v_cmd * translationalKV) +
-                    (a_d * translationalKA) + (Math.signum(v_cmd) *
-                    constants.translationalCoeffs.kS);
-            double turnPow = (w_cmd * angularKV) + (alpha_d * angularKA);
+            double totalTangentPower = v_cmd * translationalKV +
+                    a_d * translationalKA + Math.signum(v_cmd) *
+                    constants.translationalCoeffs.kS;
+            double turnPow = w_cmd * angularKV + alpha_d * angularKA;
             turnPow += Math.signum(turnPow) * constants.headingCoeffs.kS;
 
             double availableMotorPower = 1.0;
@@ -520,8 +524,6 @@ public class Follower {
             drivetrain.drive(totalTangentPower, 0.0, turnPow);
         }
     }
-
-    //region Public Methods
 
     /**
      * Starts following the given movement.
@@ -609,13 +611,13 @@ public class Follower {
      * Drives the robot using the provided inputs. The joystick inputs are adjusted for
      * field-centric or robot-centric control based on the constants. Any active follower movement
      * will be stopped as manual control takes priority over following a path. If you want to use
-     * a standard control scheme, you can pass your gamepad to the other teleOpDrive method.
+     * a standard control scheme, you can pass your gamepad to the other manual method.
      *
      * @param x forward/backward input where positive is forward
      * @param y left/right input where positive is left
      * @param turn rotation input where positive is counter-clockwise
      */
-    public void teleOpDrive(double x, double y, double turn) {
+    public void manual(double x, double y, double turn) {
         if (isBusy()) { stop(); }
         drivetrain.drive(x, y, turn, this.getPose().getHeading(AngleUnit.RAD));
     }
@@ -624,67 +626,15 @@ public class Follower {
      * Drives the robot using standard gamepad inputs. The left stick controls forward/backward and
      * left/right movement, while the right stick controls rotation. Any active follower movement
      * will be stopped as manual control takes priority over following a path. If you want to
-     * use a different control scheme, use the other teleOpDrive method with custom inputs.
+     * use a different control scheme, use the other manual method with custom inputs.
      *
      * @param gamepad the gamepad to read inputs from
      */
-    public void teleOpDrive(Gamepad gamepad) {
+    public void manual(Gamepad gamepad) {
         // Left stick Y is negated because forward is negative on the gamepad
         // Left stick X is negated because left is positive in the coordinate system
-        // Right stick X is negated because CC is positive in in the coordinate system.
-        teleOpDrive(-gamepad.left_stick_y, -gamepad.left_stick_x, -gamepad.right_stick_x);
-    }
-
-    public void disableHeadingController() { this.headingControllerEnabled = false; }
-    public void disableDriveController() { this.driveControllerEnabled = false; }
-    public void disableControllers() {
-        disableHeadingController();
-        disableDriveController();
-    }
-
-    // region Getters/Setters
-
-    public void setHeadingTuning(PDSController.PDSCoefficients coefficients) {
-        headingController.setCoefficients(coefficients);
-        headingController.setAngularController();
-        turnController.setHeadingCoefficients(coefficients);
-    }
-
-    public void setMovementTuning(PDSController.PDSCoefficients coefficients,
-                                  double translationalKV, double translationalKA,
-                                  double angularKV, double angularKA,
-                                  double forwardVelocity, double strafeVelocity) {
-        this.translationalKV = translationalKV;
-        this.translationalKA = translationalKA;
-        this.angularKV = angularKV;
-        this.angularKA = angularKA;
-        driveController.setCoefficients(coefficients);
-        driveController.setVelocityLimits(
-                Dist.fromIn(forwardVelocity),
-                Dist.fromIn(strafeVelocity),
-                drivetrain instanceof Mecanum || drivetrain instanceof DualActuated
-        );
-        turnController.setMotionGains(angularKV, angularKA, angularVelocityFeedbackGain);
-    }
-
-    public void setCentripetalTuning(double centripetalGain) {
-        this.centripetalGain = centripetalGain;
-    }
-
-    public void setVelocityFeedbackTuning(double velocityFeedbackGain,
-                                          double angularVelocityFeedbackGain) {
-        this.velocityFeedbackGain = velocityFeedbackGain;
-        this.angularVelocityFeedbackGain = angularVelocityFeedbackGain;
-        turnController.setMotionGains(angularKV, angularKA, angularVelocityFeedbackGain);
-    }
-
-    public void setDriveControllerEnabled(boolean enabled) {
-        driveControllerEnabled = enabled;
-    }
-
-    public void enableControllers() {
-        headingControllerEnabled = true;
-        driveControllerEnabled = true;
+        // Right stick X is negated because CC is positive in the coordinate system.
+        manual(-gamepad.left_stick_y, -gamepad.left_stick_x, -gamepad.right_stick_x);
     }
 
     /**
@@ -722,20 +672,41 @@ public class Follower {
      */
     public Pose getAcceleration() { return localizer.getAccel(); }
 
-    //region Internal Methods
+    public double getBestT() { return t; }
 
-    /**
-     * DO NOT USE THIS METHOD UNLESS YOU KNOW WHAT YOU ARE DOING.
-     * It is intended for internal use only.
-     */
+    public double getCrossTrackErrorIn() { return crossTrackError; }
+
+    public void disableHeadingController() { this.headingControllerEnabled = false; }
+
+    public void disableDriveController() { this.driveControllerEnabled = false; }
+
+    public void disableControllers() { disableHeadingController(); disableDriveController(); }
+
+    public void setHeadingCoefficients(PDSCoefficients coefficients) {
+        headingController.setCoefficients(coefficients);
+        turnController.setCoefficients(coefficients);
+    }
+
+    public void setDriveCoefficients(PDSCoefficients coefficients) {
+        driveController.setCoefficients(coefficients);
+    }
+
+    public void setCentripetal(double centripetalGain) { this.centripetalGain = centripetalGain; }
+
+    public void setVelocityFeedback(double velocityFeedbackGain,
+                                    double angularVelocityFeedbackGain) {
+        this.velocityFeedbackGain = velocityFeedbackGain;
+        this.angularVelocityFeedbackGain = angularVelocityFeedbackGain;
+        turnController.setMotionGains(angularKV, angularKA, angularVelocityFeedbackGain);
+    }
+
+    /** This method is intended for internal use only. */
     public BaseLocalizer<?> getLocalizer() { return localizer; }
 
-    /**
-     * DO NOT USE THIS METHOD UNLESS YOU KNOW WHAT YOU ARE DOING.
-     * It is intended for internal use only.
-     */
+    /** This method is intended for internal use only. */
     public BaseDrivetrain<?> getDrivetrain() { return drivetrain; }
 
+    /** This method is intended for internal use only. */
     public FollowerConstants getConstants() { return constants; }
 
     // endregion

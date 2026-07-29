@@ -14,16 +14,26 @@ public class Tank extends BaseDrivetrain<Tank.Constants> {
 
     @Override
     public void moveWithVectors(double x, double y, double turn) {
-        // Tank kinematics explanation (FRC, more in depth): https://www.youtube.com/watch?v=Ym34WI2rSdc
-        // For FTC, not in depth, but shows simple code: https://www.youtube.com/watch?v=pREkiGl9yi0
-        // 2 motor tank uses the front motors only, 4 motor tank uses all motors with the same power
+        /*
+        Tank kinematics explanation (FRC, in depth): https://www.youtube.com/watch?v=Ym34WI2rSdc.
+        For FTC, not in depth, but shows simple code: https://www.youtube.com/watch?v=pREkiGl9yi0.
+        2 motor tank uses the front motors only, 4 motor tank uses all motors with the same power.
+        */
         setPowers(x - turn, x + turn, x - turn, x + turn);
     }
 
     /** Configuration class for Tank drivetrain. */
     public static class Constants extends BaseDrivetrainConstants<Constants> {
         @Override
-        public Tank build(HardwareMap hardwareMap) { return new Tank(this, hardwareMap); }
+        public Tank build(HardwareMap hardwareMap) {
+            if (flMotorConfig == null || frMotorConfig == null) {
+                throw new IllegalArgumentException(
+                        "Front motor configs must be provided for a (2 wheel) tank drivetrain."
+                );
+            }
+
+            return new Tank(this, hardwareMap);
+        }
 
         /** Sets the front left motor configuration. */
         public Constants setFrontLeftMotor(Motor Motor) {

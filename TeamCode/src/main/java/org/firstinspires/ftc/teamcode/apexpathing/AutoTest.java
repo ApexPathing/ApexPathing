@@ -6,7 +6,6 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import core.Follower;
 import geometry.GeometryFactory;
 import geometry.Pose;
-import paths.ExampleAutoPath;
 
 /**
  * Test autonomous OpMode for Apex Pathing that uses the {@link ExampleAutoPath}. Make sure the
@@ -16,7 +15,7 @@ import paths.ExampleAutoPath;
  * @author Sohum Arora - 22985 Paraducks
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
-@Autonomous(name = "Apex Auto Test", group = "Apex Pathing Tests")
+@Autonomous(name = "Apex Auto Test", group = "Apex Pathing")
 public class AutoTest extends LinearOpMode {
     ExampleAutoPath path;
     AutoState currentState = AutoState.TEST_PATH;
@@ -28,7 +27,8 @@ public class AutoTest extends LinearOpMode {
         Follower follower = new Follower(new Constants(), hardwareMap);
         path = new ExampleAutoPath(follower, GeometryFactory.PoseMirror.NONE);
 
-        telemetry.addLine("Robot initialized");
+        telemetry.addLine("Use B to stop all robot movement");
+        telemetry.addLine("Press Start to begin");
         telemetry.update();
 
         waitForStart();
@@ -39,6 +39,11 @@ public class AutoTest extends LinearOpMode {
         while (opModeIsActive()) {
             follower.update();
             Pose pose = follower.getPose();
+
+            if (gamepad1.b) { // Halt the robot if B is pressed
+                follower.pause();
+                telemetry.addLine("Follower stopped");
+            }
 
             switch (currentState) {
                 case TEST_PATH:

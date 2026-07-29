@@ -67,10 +67,10 @@ public class ThreeWheel extends BaseLocalizer<ThreeWheel.Constants> {
         strafePod.reset();
     }
 
-    public static class Constants extends BaseLocalizerConstants<Constants> {
-        public String forwardLeftPodName = null;
-        public String forwardRightPodName = null;
-        public String strafePodName = null;
+    public static class Constants implements BaseLocalizerConstants<Constants> {
+        public String forwardLeftPodName;
+        public String forwardRightPodName;
+        public String strafePodName;
         public Vector offsets = Vector.zero();
         public double ticksPerInch = 1.0;
 
@@ -80,8 +80,8 @@ public class ThreeWheel extends BaseLocalizer<ThreeWheel.Constants> {
                     this.strafePodName == null) {
                 throw new IllegalArgumentException(
                         "You must call setForwardLeftPodName, setForwardRightPodName, and " +
-                                "setStrafePodName to set the names of the motor ports that hold the " +
-                                "odometry pod encoders"
+                                "setStrafePodName to set the names of the motor ports that hold " +
+                                "the odometry pod encoders."
                 );
             }
 

@@ -14,12 +14,6 @@ import geometry.Vector;
 public class Mecanum extends BaseDrivetrain<Mecanum.Constants> {
     public Mecanum(Constants constants, HardwareMap hardwareMap) {
         super(constants, hardwareMap, DrivetrainType.MECANUM);
-
-        if (constants.blMotorConfig == null || constants.brMotorConfig == null) {
-            throw new IllegalArgumentException(
-                    "Back left and right motor configurations must be provided for a mecanum drivetrain"
-            );
-        }
     }
 
     @Override
@@ -34,6 +28,13 @@ public class Mecanum extends BaseDrivetrain<Mecanum.Constants> {
     public static class Constants extends BaseDrivetrainConstants<Constants> {
         @Override
         public Mecanum build(HardwareMap hardwareMap) {
+            if (flMotorConfig == null || frMotorConfig == null || blMotorConfig == null ||
+                    brMotorConfig == null) {
+                throw new IllegalArgumentException(
+                        "All 4 motor configs must be provided for a mecanum drivetrain."
+                );
+            }
+
             return new Mecanum(this, hardwareMap);
         }
 
@@ -96,8 +97,8 @@ public class Mecanum extends BaseDrivetrain<Mecanum.Constants> {
                 double absForward = Math.abs(Math.cos(theta));
                 double absStrafe = Math.abs(Math.sin(theta));
 
-                double maxVel = 1.0 / ((absForward / maxFwdVel) + (absStrafe / maxSfeVel));
-                double maxAccel = 1.0 / ((absForward / maxFwdAccel) + (absStrafe / maxSfeAccel));
+                double maxVel = 1.0 / (absForward / maxFwdVel + absStrafe / maxSfeVel);
+                double maxAccel = 1.0 / (absForward / maxFwdAccel + absStrafe / maxSfeAccel);
 
                 double velMultiplier = maxFwdVel / maxVel;
                 double accelMultiplier = maxFwdAccel / maxAccel;
@@ -114,10 +115,9 @@ public class Mecanum extends BaseDrivetrain<Mecanum.Constants> {
 
             Vector localVector = globalDriveVector.rotate(currentHeading.times(-1.0));
             double degrees = Math.toDegrees(localVector.getTheta().getRad());
-            degrees = ((degrees % 360.0) + 360.0) % 360.0;
+            degrees = (degrees % 360.0 + 360.0) % 360.0;
 
             int lowIndex = (int) Math.floor(degrees);
-            int highIndex = (lowIndex + 1) % 360;
             double t = degrees - lowIndex;
 
             if (t < 1e-9) {
@@ -125,7 +125,7 @@ public class Mecanum extends BaseDrivetrain<Mecanum.Constants> {
             }
 
             DirectionalKinematics low = lut[lowIndex];
-            DirectionalKinematics high = lut[highIndex];
+            DirectionalKinematics high = lut[(lowIndex + 1) % 360];
 
             return new DirectionalKinematics(
                     interpolate(low.maxVel, high.maxVel, t),
@@ -136,7 +136,7 @@ public class Mecanum extends BaseDrivetrain<Mecanum.Constants> {
         }
 
         private double interpolate(double low, double high, double t) {
-            return low + ((high - low) * t);
+            return low + (high - low) * t;
         }
     }
 }

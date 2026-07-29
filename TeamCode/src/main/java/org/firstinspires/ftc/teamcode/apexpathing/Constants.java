@@ -15,7 +15,7 @@ import drivetrains.Motor;
  * @author Dylan B. - 18597 RoboClovers - Delta
  * @author Sohum Arora - 22985 Paraducks
  */
-public class Constants extends ApexConstants {
+public class Constants implements ApexConstants {
     @Override
     public BaseDrivetrainConstants<?> drivetrainConstants() {
         return new Mecanum.Constants()

@@ -4,45 +4,37 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import feedforward.FeedforwardLut;
+import feedforward.FFLut;
 import geometry.PathPoint;
 import geometry.PathSegment;
 import geometry.Pose;
 import paths.Callback;
 import paths.constraint.PathConstraint;
-import paths.constraint.PathConstraint.ConstraintType;
+import paths.constraint.PathConstraint.Type;
 import paths.constraint.TranslationalConstraint;
 import paths.heading.HeadingInterpolator;
 
 /**
  * Represents a complete, navigable geometric route for the robot to follow.
  *
- * <p>
- * A {@code Path} encapsulates a continuous parametric curve (e.g., a B-Spline),
- * its associated heading interpolation strategy, and any scheduled mechanical
- * callbacks triggered along the route.
- * <p>
+ * <p>A {@code Path} encapsulates a continuous parametric curve (e.g., a B-Spline), its associated
+ * heading interpolation strategy, and any scheduled mechanical callbacks triggered along the route.
  *
  * @author DrPixelCat - 7842 alum
  * @author Sohum Arora - 22985 Paraducks
  */
 public class Path extends FollowerMovement {
-    private final List<String> buildWarnings = new ArrayList<>();
-    private final ArrayList<Callback> callbacks = new ArrayList<>();
-    private final ArrayList<PathConstraint> constraints = new ArrayList<>();
+    public enum PathType { HOLONOMIC, TANK }
+
+    private final List<String> buildWarnings = new ArrayList<String>();
+    private final ArrayList<Callback> callbacks = new ArrayList<Callback>();
+    private final ArrayList<PathConstraint> constraints = new ArrayList<PathConstraint>();
+    private final PathType pathType;
 
     private PathSegment parametricPath;
     private HeadingInterpolator interpolator;
-    private Pose endPose;
-    private FeedforwardLut feedforwardLut;
+    private FFLut FFLut;
     private boolean isAccelBoosted = false;
-
-    public enum PathType {
-        HOLONOMIC,
-        TANK
-    }
-
-    private final PathType pathType;
 
     /**
      * Creates a path object for the robot to follow
@@ -78,7 +70,7 @@ public class Path extends FollowerMovement {
         for (PathConstraint baseConstraint : constraints) {
             if (baseConstraint instanceof TranslationalConstraint) {
                 TranslationalConstraint constraint = (TranslationalConstraint) baseConstraint;
-                if (constraint.getType() == ConstraintType.VELOCITY) {
+                if (constraint.getType() == Type.VELOCITY) {
                     if (t >= constraint.getS() && constraint.getS() > highestS) {
                         currentLimit = constraint.getValueIn();
                         highestS = constraint.getS();
@@ -90,10 +82,7 @@ public class Path extends FollowerMovement {
     }
 
     /** @param endPose The final target pose of this path. */
-    public void setEndPose(Pose endPose) {this.endPose = endPose;}
-
-    /** @return The final target pose of this path. */
-    public Pose getEndPose() { return endPose; }
+    public void setEndPose(Pose endPose) { this.endPose = endPose; }
 
     /** @return The generated LUT points from the ParametricPath */
     public PathPoint[] getGeneratedPoints() { return parametricPath.getPointLUT().clone(); }
@@ -125,15 +114,13 @@ public class Path extends FollowerMovement {
     public PathType getPathType() { return pathType; }
 
     /** @return The feedforward look-up table */
-    public FeedforwardLut getFeedforwardLut() { return feedforwardLut; }
+    public FFLut getFeedforwardLut() { return FFLut; }
 
-    /** @param feedforwardLut The path's motion profile as a {@link FeedforwardLut} */
-    public void setFeedforwardLut(FeedforwardLut feedforwardLut) {
-        this.feedforwardLut = feedforwardLut;
-    }
+    /** @param FFLut The path's motion profile as a {@link FFLut} */
+    public void setFeedforwardLut(FFLut FFLut) { this.FFLut = FFLut; }
 
     /** @return true if built with profiledBuild(), false if built with quickBuild() */
-    public boolean isProfiled() { return feedforwardLut != null; }
+    public boolean isProfiled() { return FFLut != null; }
 
     /** Determines if this path should be followed with boosted acceleration. */
     public void useBoostedAccel() { isAccelBoosted = true; }

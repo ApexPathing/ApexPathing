@@ -7,10 +7,15 @@ import controllers.PDSController.PDSCoefficients;
 import geometry.Pose;
 
 /**
+ * A routine that tunes kP, kD, and kS for a specific axis (drive, strafe, or heading) by first
+ * tuning the kS value and then tuning the kP and kD values based on the maximum acceleration
+ * observed during a movement.
+ *
+ * @author Dylan B. - 18597 RoboClovers - Delta
  * @author Sohum Arora - 22985 Paraducks
  */
 public class PDSRoutine {
-    enum TuningAxis {
+    enum Axis {
         DRIVE,
         STRAFE,
         HEADING
@@ -22,32 +27,35 @@ public class PDSRoutine {
         SETTLING_FOR_PD,
         TUNING_PD
     }
-    private final double movementThreshold = 0.05;
-    private final double headingThreshold = 0.02;
-    private final double guessTime = 1500.0;
-    private final double settlingTime = 750.0;
-    private final double tuningTime = 2000.0;
-    private final TuningAxis axis;
+
+    private static final double MOVEMENT_THRESHOLD = 0.05;
+    private static final double HEADING_THRESHOLD = 0.02;
+    private static final double GUESS_TIME = 1500;
+    private static final double SETTLING_TIME = 750;
+    private static final double TUNING_TIME = 2000;
+
+    private final Axis axis;
     private final ElapsedTime timer = new ElapsedTime();
     private final PDSController controller;
     private final BinarySearch search;
     private final double threshold;
+
     private PDSState state = PDSState.TUNING_KS;
     private double startTime;
     private double maxAcceleration;
     private double velocityAtMaxAcceleration;
     private double maxAccelerationTime;
 
-    PDSRoutine(TunerContext context, TuningAxis axis) {
+    PDSRoutine(TunerContext context, Axis axis) {
         search = new BinarySearch(0.0, 0.4, 0.01);
         this.axis = axis;
         context.getFollower().disableControllers();
         context.getFollower().setPose(Pose.zero());
         controller = new PDSController(new PDSCoefficients());
-        if (axis == TuningAxis.HEADING) {
+        if (axis == Axis.HEADING) {
             controller.setAngularController();
         }
-        threshold = axis == TuningAxis.HEADING ? headingThreshold : movementThreshold;
+        threshold = axis == Axis.HEADING ? HEADING_THRESHOLD : MOVEMENT_THRESHOLD;
     }
 
     void start() {
@@ -83,11 +91,12 @@ public class PDSRoutine {
         }
     }
 
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     boolean update(TunerContext context) {
         switch (state) {
             case TUNING_KS:
                 move(context, search.getGuess());
-                if (timer.milliseconds() >= guessTime) {
+                if (timer.milliseconds() >= GUESS_TIME) {
                     double movement = Math.abs(getValue(context.getFollower().getPose()));
                     boolean keepTuning = search.updateGuess(movement <= threshold);
                     state = keepTuning ? PDSState.SETTLING_BETWEEN_KS : PDSState.SETTLING_FOR_PD;
@@ -99,7 +108,7 @@ public class PDSRoutine {
                 break;
             case SETTLING_BETWEEN_KS:
                 context.getFollower().stop();
-                if (timer.milliseconds() >= settlingTime) {
+                if (timer.milliseconds() >= SETTLING_TIME) {
                     state = PDSState.TUNING_KS;
                     timer.reset();
                     context.getFollower().setPose(Pose.zero());
@@ -107,7 +116,7 @@ public class PDSRoutine {
                 break;
             case SETTLING_FOR_PD:
                 context.getFollower().stop();
-                if (timer.milliseconds() >= settlingTime) {
+                if (timer.milliseconds() >= SETTLING_TIME) {
                     state = PDSState.TUNING_PD;
                     timer.reset();
                     startTime = System.nanoTime();
@@ -121,13 +130,16 @@ public class PDSRoutine {
                     maxAccelerationTime = (System.nanoTime() - startTime) / 1.0e9;
                     velocityAtMaxAcceleration = getValue(context.getFollower().getVelocity());
                 }
-                if (timer.milliseconds() >= tuningTime) {
+                if (timer.milliseconds() >= TUNING_TIME) {
                     context.getFollower().stop();
                     if (maxAcceleration <= 0.001) {
-                        throw new IllegalStateException("Max acceleration was too low during tuning.");
+                        throw new IllegalStateException(
+                                "Max acceleration was too low during tuning."
+                        );
                     }
-                    double delay = Math.max(0.001,
-                            maxAccelerationTime - velocityAtMaxAcceleration / maxAcceleration);
+                    double delay = Math.max(
+                            0.001, maxAccelerationTime - velocityAtMaxAcceleration / maxAcceleration
+                    );
                     controller.getCoefficients().setkP(1.2 / (delay * maxAcceleration));
                     controller.getCoefficients().setkD(0.6 / maxAcceleration);
                     return true;
@@ -137,7 +149,5 @@ public class PDSRoutine {
         return false;
     }
 
-    PDSCoefficients getCoefficients() {
-        return controller.getCoefficients();
-    }
+    PDSCoefficients getCoefficients() { return controller.getCoefficients(); }
 }

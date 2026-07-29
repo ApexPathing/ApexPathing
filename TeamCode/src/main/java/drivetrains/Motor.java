@@ -30,25 +30,19 @@ public class Motor {
      */
     public Motor() { this("defaultMotorName"); }
 
-    /**
-     * Sets the motor direction to reverse instead of teh default forward
-     */
+    /** Sets the motor direction to reverse instead of teh default forward */
     public Motor reverse() {
         this.reversed = true;
         return this;
     }
 
-    /**
-     * Sets the motors zero power behavior to float instead of the default brake
-     */
+    /** Sets the motors zero power behavior to float instead of the default brake */
     public Motor floatMode() {
         this.floatMode = true;
         return this;
     }
 
-    /**
-     * @param mode The {@link RunMode} of the motor. Defaults to RUN_WITHOUT_ENCODER.
-     */
+    /** @param mode The {@link RunMode} of the motor. Defaults to RUN_WITHOUT_ENCODER. */
     public Motor runWith(RunMode mode) {
         this.runMode = mode;
         return this;
@@ -66,11 +60,8 @@ public class Motor {
         return motor;
     }
 
-    public String getName() {return name;}
-
-    public boolean getReversed() {return reversed;}
-
-    public boolean getFloatMode() {return floatMode;}
-
-    public RunMode getRunMode() {return runMode;}
+    public String getName() { return name; }
+    public boolean getReversed() { return reversed; }
+    public boolean getFloatMode() { return floatMode; }
+    public RunMode getRunMode() { return runMode; }
 }

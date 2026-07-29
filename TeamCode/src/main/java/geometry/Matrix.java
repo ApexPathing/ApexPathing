@@ -36,7 +36,7 @@ public class Matrix {
     public double[] multiply(double[] vector) {
         if (vector.length != this.cols) {
             throw new IllegalArgumentException(
-                    "Matrix columns (" + this.cols + ") must match vector length (" + vector.length + ")."
+                    "Matrix cols (" + cols + ") must match vector length (" + vector.length + ")."
             );
         }
 
@@ -52,14 +52,5 @@ public class Matrix {
     }
 
     /** Get a value from the matrix. */
-    public double get(int row, int col) {
-        if (row < 0 || row > rows || col < 0 || col > cols) {
-            throw new IllegalArgumentException("Index out of bounds!");
-        }
-        return data[row][col];
-    }
-
-    public int getRows() { return rows; }
-
-    public int getCols() { return cols; }
+    public double get(int row, int col) { return data[row][col]; }
 }

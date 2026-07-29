@@ -7,11 +7,10 @@ import geometry.Vector;
 /**
  * Shared translational controller and holonomic power allocator.
  *
- * <p>
- * Field-space path corrections are converted to robot space here. Mecanum allocation additionally
- * applies the robot-relative strafe penalty and measures power using mecanum wheel demand
- * {@code |forward| + |strafe|}. Isotropic allocation is used by swerve and other holonomic drives.
- * </p>
+ * <p>Field-space path corrections are converted to robot space here. Mecanum allocation
+ * additionally applies the robot-relative strafe penalty and measures power using mecanum wheel
+ * demand {@code |forward| + |strafe|}. Isotropic allocation is used by swerve and other holonomic
+ * drives.
  *
  * @author DrPixelCat - 7842 alum
  */
@@ -19,7 +18,7 @@ public class DriveController {
     private static final double EPSILON = 1e-9;
 
     /** One robot-centric command together with the translation budget it consumes. */
-    public static final class AllocatedCommand {
+    public static class AllocatedCommand {
         private final Vector robotCommand;
         private final double powerDemand;
 
@@ -34,16 +33,16 @@ public class DriveController {
     }
 
     private double strafePenaltyRatio;
-    private final PDSController crossTrackPds;
-    private final PDSController endDistancePds;
-    private final PDSController turnPositionPds;
+    private final PDSController crossTrackPDS;
+    private final PDSController endDistancePDS;
+    private final PDSController turnPositionPDS;
 
     public DriveController(Dist maxForwardVelocity, Dist maxStrafeVelocity,
                            PDSController.PDSCoefficients coefficients,
                            boolean requireMecanumLimits) {
-        crossTrackPds = new PDSController(coefficients);
-        endDistancePds = new PDSController(coefficients);
-        turnPositionPds = new PDSController(coefficients);
+        crossTrackPDS = new PDSController(coefficients);
+        endDistancePDS = new PDSController(coefficients);
+        turnPositionPDS = new PDSController(coefficients);
         setVelocityLimits(maxForwardVelocity, maxStrafeVelocity, requireMecanumLimits);
     }
 
@@ -54,19 +53,22 @@ public class DriveController {
         boolean invalidLimits = !Double.isFinite(forwardVelocity) || forwardVelocity <= 0.0 ||
                 !Double.isFinite(strafeVelocity) || strafeVelocity <= 0.0;
 
+        // TODO: Re-enable this once we figure out a good way to not require mecanum limits when its untuned
+        /*
         if (requireMecanumLimits && invalidLimits) {
             throw new IllegalArgumentException(
                     "Mecanum forward and strafe velocity limits must both be positive."
             );
         }
+        */
 
         strafePenaltyRatio = invalidLimits ? 1.0 : forwardVelocity / strafeVelocity;
     }
 
     public void setCoefficients(PDSController.PDSCoefficients coefficients) {
-        crossTrackPds.setCoefficients(coefficients);
-        endDistancePds.setCoefficients(coefficients);
-        turnPositionPds.setCoefficients(coefficients);
+        crossTrackPDS.setCoefficients(coefficients);
+        endDistancePDS.setCoefficients(coefficients);
+        turnPositionPDS.setCoefficients(coefficients);
         reset();
     }
 
@@ -74,13 +76,13 @@ public class DriveController {
     public Vector calculatePointToPoint(Vector targetPos, Vector currentPos) {
         Vector fieldError = targetPos.minus(currentPos);
 
-        double basePower = turnPositionPds.calculate(fieldError.getMag().getIn());
+        double basePower = turnPositionPDS.calculate(fieldError.getMag().getIn());
         return Vector.fromPolar(Dist.fromIn(basePower), fieldError.getTheta());
     }
 
-    public double calculateCrossTrack(double error) { return crossTrackPds.calculate(error); }
+    public double calculateCrossTrack(double error) { return crossTrackPDS.calculate(error); }
 
-    public double calculateEndDistance(double error) { return endDistancePds.calculate(error); }
+    public double calculateEndDistance(double error) { return endDistancePDS.calculate(error); }
 
     /** Allocates one field-centric stage using mecanum direction-dependent wheel demand. */
     public AllocatedCommand allocateMecanum(Vector fieldCommand, Angle currentHeading,
@@ -112,22 +114,20 @@ public class DriveController {
         return Math.abs(robotCommand.getX().getIn()) + Math.abs(robotCommand.getY().getIn());
     }
 
-    private static AllocatedCommand limitByDemand(Vector command, double demand,
-                                                   double availablePower) {
-        double budget = Math.max(0.0, availablePower);
+    private static AllocatedCommand limitByDemand(Vector command, double demand, double available) {
+        double budget = Math.max(0.0, available);
         if (demand <= EPSILON || budget <= EPSILON) {
             return new AllocatedCommand(Vector.zero(), 0.0);
         }
         if (demand > budget) {
-            command = command.times(budget / demand);
-            demand = budget;
+            return new AllocatedCommand(command.times(budget / demand), budget);
         }
         return new AllocatedCommand(command, demand);
     }
 
     public void reset() {
-        crossTrackPds.reset();
-        endDistancePds.reset();
-        turnPositionPds.reset();
+        crossTrackPDS.reset();
+        endDistancePDS.reset();
+        turnPositionPDS.reset();
     }
 }

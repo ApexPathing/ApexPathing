@@ -25,10 +25,10 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
     protected Pose velocity = Pose.zero();
     protected Pose acceleration = Pose.zero();
 
-    // Only used for calculating velocity on some localizers
+    /** Only used for calculating velocity on some localizers */
     private Pose prevPose = Pose.zero();
 
-    // Only used for calculating acceleration on some localizers
+    /** Only used for calculating acceleration on some localizers */
     private Pose prevVelocity = Pose.zero();
     private long prevTimeNs = -1;
 
