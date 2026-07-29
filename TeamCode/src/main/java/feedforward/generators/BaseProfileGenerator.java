@@ -120,7 +120,7 @@ public abstract class BaseProfileGenerator {
         // If any point still saturates, lower one nearby velocity and let both passes smooth it.
         while (profileEval.maxUtilization > UTILIZATION_LIMIT + UTILIZATION_TOLERANCE
                 && iterations < maxIterations) {
-            int checkIndex = Math.max(1, profileEval.worstIndex);
+            int checkIndex = profileEval.worstIndex;
             int pinIndex = choosePinIndex(outputParams, checkIndex);
 
             // Reduce the closest useful velocity sample, then rerun both sweeps so the change
@@ -167,7 +167,7 @@ public abstract class BaseProfileGenerator {
      * power) based on the final velocity sweep.
      *
      * <p>Main formulas:
-     * {@code a = (v^2 - v_prev^2) / (2 * ds)},
+     * {@code a = (v_next^2 - v^2) / (2 * ds)},
      * {@code omega = dtheta/ds * v}, and
      * {@code alpha = d2theta/ds2 * v^2 + dtheta/ds * a}.
      * The last formula is the chain rule: heading changes with path distance, and path distance
@@ -178,18 +178,16 @@ public abstract class BaseProfileGenerator {
         EvaluationResult currentEval = new EvaluationResult();
         ProfileEvaluation profileEval = new ProfileEvaluation();
         Vector finalTangent = path.getParametricPath().getFirstDerivative(1.0);
-        lut[0].setTangentialAccel(0.0);
-        lut[0].setAngularVel(0.0);
-        lut[0].setAngularAccel(0.0);
-
-        for (int i = 1; i < points.length; i++) {
-            double ds = Math.abs(points[i].getDistanceToEndIn() -
-                    points[i - 1].getDistanceToEndIn());
+        for (int i = 0; i < points.length - 1; i++) {
+            double ds = Math.abs(points[i + 1].getDistanceToEndIn()
+                    - points[i].getDistanceToEndIn());
             double v = lut[i].getTangentialVel();
-            double v_prev = lut[i - 1].getTangentialVel();
+            double nextVelocity = lut[i + 1].getTangentialVel();
 
-            // Constant-acceleration kinematics in path-distance space.
-            double a_t = (ds < EPSILON) ? 0.0 : (v * v - v_prev * v_prev) / (2.0 * ds);
+            // Acceleration belongs to the segment beginning at this sample. This lets the first
+            // row command the robot away from rest instead of incorrectly reporting zero accel.
+            double a_t = (ds < EPSILON) ? 0.0
+                    : (nextVelocity * nextVelocity - v * v) / (2.0 * ds);
 
             lut[i].setTangentialAccel(a_t);
 
@@ -206,7 +204,7 @@ public abstract class BaseProfileGenerator {
             lut[i].setAngularVel(fPrime * v);
             lut[i].setAngularAccel(fDoublePrime * (v * v) + fPrime * a_t);
 
-            evaluatePoint(path, points[i - 1], points[i], v_prev, v, a_t, currentEval);
+            evaluatePoint(path, points[i], points[i], v, v, a_t, currentEval);
             lut[i].setMotorPower(currentEval.totalPower);
 
             // Track the worst point so the pinning loop knows where to reduce speed.
@@ -220,7 +218,16 @@ public abstract class BaseProfileGenerator {
             }
         }
 
-        lut[0].setMotorPower(lut.length > 1 ? lut[1].getMotorPower() : 0.0);
+        int lastIndex = lut.length - 1;
+        double finalVelocity = lut[lastIndex].getTangentialVel();
+        double finalS = points[lastIndex].getDistanceToEndIn();
+        double finalKappa = points[lastIndex].getSignedCurvature();
+        double finalFPrime = path.getInterpolator().getHeadingFirstDerivative(
+                finalS, finalKappa, finalTangent);
+        lut[lastIndex].setTangentialAccel(0.0);
+        lut[lastIndex].setAngularVel(finalFPrime * finalVelocity);
+        lut[lastIndex].setAngularAccel(0.0);
+        lut[lastIndex].setMotorPower(0.0);
         return profileEval;
     }
 
@@ -263,7 +270,6 @@ public abstract class BaseProfileGenerator {
         // Forward pass: Naive acceleration and populate angular targets
         // If boosted, relax the boundary condition so the path begins at cruising speed
         if (!path.isAccelBoosted()) { lut[0].setTangentialVel(0.0); }
-        Vector finalTangent = path.getParametricPath().getFirstDerivative(1.0);
 
         for (int i = 1; i < points.length; i++) {
             double ds =
@@ -274,8 +280,16 @@ public abstract class BaseProfileGenerator {
 
             double v = Math.min(lut[i].getTangentialVel(), maxReachableVel);
             lut[i].setTangentialVel(v);
+        }
 
-            double a_t = (ds < EPSILON) ? 0.0 : (v * v - prevVel * prevVel) / (2.0 * ds);
+        Vector finalTangent = path.getParametricPath().getFirstDerivative(1.0);
+        for (int i = 0; i < points.length - 1; i++) {
+            double ds = Math.abs(points[i + 1].getDistanceToEndIn()
+                    - points[i].getDistanceToEndIn());
+            double v = lut[i].getTangentialVel();
+            double nextVelocity = lut[i + 1].getTangentialVel();
+            double a_t = (ds < EPSILON) ? 0.0
+                    : (nextVelocity * nextVelocity - v * v) / (2.0 * ds);
             lut[i].setTangentialAccel(a_t);
 
             double s = points[i].getDistanceToEndIn();
@@ -290,6 +304,16 @@ public abstract class BaseProfileGenerator {
             lut[i].setAngularVel(fPrime * v);
             lut[i].setAngularAccel(fDoublePrime * (v * v) + fPrime * a_t);
         }
+
+        int lastIndex = lut.length - 1;
+        double finalVelocity = lut[lastIndex].getTangentialVel();
+        double finalS = points[lastIndex].getDistanceToEndIn();
+        double finalKappa = points[lastIndex].getSignedCurvature();
+        double finalFPrime = path.getInterpolator().getHeadingFirstDerivative(
+                finalS, finalKappa, finalTangent);
+        lut[lastIndex].setTangentialAccel(0.0);
+        lut[lastIndex].setAngularVel(finalFPrime * finalVelocity);
+        lut[lastIndex].setAngularAccel(0.0);
 
         return new FFLut(lut);
     }
@@ -502,7 +526,7 @@ public abstract class BaseProfileGenerator {
         double low = 0.0;
         double high = currentVelocity;
         double bestVelocity = 0.0;
-        int boundedCheckIndex = Math.max(1, Math.min(checkIndex, currentProfile.length - 1));
+        int boundedCheckIndex = Math.max(0, Math.min(checkIndex, currentProfile.length - 1));
 
         for (int i = 0; i < PIN_SEARCH_ITERATIONS; i++) {
             double candidate = (low + high) / 2.0;

@@ -33,7 +33,7 @@ public class FollowerTuner extends LinearOpMode {
         HEADING(HeadingPhase.class, (FollowerConstants constants) ->
                 constants.headingCoeffs.kP != 0.0),
         LIMITS(LimitsPhase.class, (FollowerConstants constants) ->
-                constants.angular.KA != 0.0),
+                constants.angularKA != 0.0),
         DRIVE(DrivePhase.class, (FollowerConstants constants) ->
                 constants.translationalCoeffs.kP != 0.0),
         CENTRIPETAL(CentripetalPhase.class, (FollowerConstants constants) ->

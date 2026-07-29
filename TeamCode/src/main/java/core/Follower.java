@@ -17,6 +17,7 @@ import feedforward.MotionParameters;
 import geometry.Angle;
 import geometry.AngleUnit;
 import geometry.Dist;
+import geometry.DistUnit;
 import geometry.PathSegment;
 import geometry.Pose;
 import geometry.Vector;
@@ -48,6 +49,7 @@ public class Follower {
     private double lastS = -1.0;
     private long lastNano = -1;
     private Angle lastHeading; // Tracks heading between ticks for angular callback sweeps
+    private Pose lastPose;
 
     private final PDSController headingController;
     private final TurnController turnController;
@@ -206,10 +208,47 @@ public class Follower {
      * Must be called continuously during the active OpMode loop to drive the robot along the path.
      */
     public void update() {
+        update(false);
+    }
+
+    /**
+     * The main execution loop of the follower.
+     * Must be called continuously during the active OpMode loop to drive the robot along the path.
+     *
+     * @param holdPose whether to hold the most recently commanded end pose when idle
+     */
+    public void update(boolean holdPose) {
         localizer.update();
 
-        // Exit early if nothing is running
+        // Exit early if nothing is running or if paused.
         if (currentMovement == null || paused) {
+            if (holdPose && lastPose != null) {
+                double angularResponse = headingController.calculate(
+                        lastPose.getHeading(AngleUnit.RAD) - getPose().getHeading(AngleUnit.RAD)
+                );
+                Vector translationalResponse;
+                if (drivetrain.isHolonomic()) {
+                    translationalResponse = driveController.calculatePointToPoint(
+                            lastPose.getVec(), getPose().getVec()
+                    );
+                } else {
+                    Vector globalError = lastPose.getVec().minus(getPose().getVec());
+                    Vector localError =
+                            globalError.rotate(lastPose.getHeading().times(-1.0));
+                    double forwardError = localError.getX(DistUnit.IN);
+                    translationalResponse = new Vector(
+                            Dist.fromIn(driveController.calculateEndDistance(forwardError)),
+                            Dist.zero()
+                    );
+                }
+                drivetrain.drive(
+                        translationalResponse.getX().getIn(),
+                        translationalResponse.getY().getIn(),
+                        angularResponse
+                );
+            } else {
+                drivetrain.stop();
+            }
             return;
         }
 
@@ -505,6 +544,7 @@ public class Follower {
         this.currentMovement.setStarted(true);
         this.currentMovement.setEnded(false);
         this.targetHeading = movement.getEndPose().getHeading();
+        this.lastPose = movement.getEndPose();
 
         if (movement instanceof Turn) {
             Turn turn = (Turn) currentMovement;
