@@ -155,4 +155,6 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
 
     /** Stop all drivetrain actuators */
     public void stop() { setPowers(0, 0, 0, 0); }
+
+    public T getConstants() { return constants; }
 }
