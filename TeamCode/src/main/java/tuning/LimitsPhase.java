@@ -46,7 +46,7 @@ public class LimitsPhase extends TuningPhase {
     private final double[][] maxima = new double[TRIALS.length][2];
 
     private PDSController headingHoldController;
-    private LimitStage stage = LimitStage.RUNNING;
+    private LimitStage stage = LimitStage.SETTLING;
     private int trial = 0;
     private double heldHeading = 0;
 
@@ -73,7 +73,7 @@ public class LimitsPhase extends TuningPhase {
     protected void init() {
         headingHoldController = new PDSController(context.constants.headingCoeffs);
         headingHoldController.setAngularController();
-        heldHeading = context.getFollower().getPose().getHeading().getRad();
+        timer.reset();
     }
 
     private void runTrial() {
