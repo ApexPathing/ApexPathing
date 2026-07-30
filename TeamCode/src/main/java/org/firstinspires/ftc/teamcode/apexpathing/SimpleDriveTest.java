@@ -64,6 +64,10 @@ public class SimpleDriveTest extends LinearOpMode {
             telemetry.addData("X (in):", pose.getX().getIn());
             telemetry.addData("Y (in):", pose.getY().getIn());
             telemetry.addData("Heading (deg):", pose.getHeading().getDeg());
+            telemetry.addData("Left Motor Power", follower.getDrivetrain().getLastFlPower());
+            telemetry.addData("Right Motor Power", follower.getDrivetrain().getLastFrPower());
+            telemetry.addData("Back Left Motor Power", follower.getDrivetrain().getLastBlPower());
+            telemetry.addData("Back Right Motor Power", follower.getDrivetrain().getLastBrPower());
             telemetry.update();
         }
     }
