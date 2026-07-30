@@ -96,6 +96,11 @@ public class CentripetalPhase extends TuningPhase {
 
     @Override
     protected boolean autoTuned() {
+        context.getTelemetry().addData("Current Pose", context.getFollower().getPose().toString());
+        context.getTelemetry().addData("Follower T", context.getFollower().getBestT());
+        context.getTelemetry().addData("Follower Cross Track Error", context.getFollower().getCrossTrackErrorIn());
+        context.getTelemetry().addData("Average Error", averageError);
+
         if (!updateTrial()) {
             return false;
         }
