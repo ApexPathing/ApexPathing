@@ -246,8 +246,6 @@ public class Follower {
                         translationalResponse.getY().getIn(),
                         angularResponse
                 );
-            } else {
-                drivetrain.stop();
             }
             return;
         }
