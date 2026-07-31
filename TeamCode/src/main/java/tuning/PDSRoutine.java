@@ -32,7 +32,7 @@ public class PDSRoutine {
     private static final double HEADING_THRESHOLD = 0.02;
     private static final double GUESS_TIME = 1500;
     private static final double SETTLING_TIME = 750;
-    private static final double TUNING_TIME = 2000;
+    private static final double TUNING_TIME = 1250;
 
     private final Axis axis;
     private final ElapsedTime timer = new ElapsedTime();
