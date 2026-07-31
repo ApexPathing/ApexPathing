@@ -87,6 +87,7 @@ public class HeadingPhase extends TuningPhase {
                         0.0, context.constants.headingCoeffs.kS + change
                 );
             }
+            context.getFollower().setHeadingCoefficients(context.constants.headingCoeffs);
         }
 
         if (opMode.gamepad1.xWasPressed() && !context.getFollower().isBusy()) {
@@ -101,11 +102,11 @@ public class HeadingPhase extends TuningPhase {
         context.getTelemetry().addData("Selected", selected.toString());
         reportResults();
         context.getTelemetry().addData("Increment", increment);
-        context.getTelemetry().addLine("Dpad Up/Down: change value");
-        context.getTelemetry().addLine("Dpad Left/Right: change increment");
-        context.getTelemetry().addLine("LB/RB: select value to tune");
-        context.getTelemetry().addLine("X: test turn");
-        context.getTelemetry().addLine("A: save");
+        context.getTelemetry().addLine("Dpad Up/Down: Change value");
+        context.getTelemetry().addLine("Dpad Left/Right: Change increment");
+        context.getTelemetry().addLine("LB/RB: select Value to tune");
+        context.getTelemetry().addLine("X: Run test turn");
+        context.getTelemetry().addLine("A: Save");
         context.getTelemetry().update();
 
         return false;
