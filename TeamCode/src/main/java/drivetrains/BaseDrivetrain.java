@@ -34,7 +34,7 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
      */
     protected DcMotorEx flMotor, frMotor, blMotor, brMotor;
 
-    private static final double POWER_TOLERANCE = 0;
+    private static final double POWER_TOLERANCE = 0.001;
     private double lastFlPower, lastFrPower, lastBlPower, lastBrPower = 0.0;
 
     /**

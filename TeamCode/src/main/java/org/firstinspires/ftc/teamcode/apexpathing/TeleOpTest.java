@@ -50,10 +50,6 @@ public class TeleOpTest extends LinearOpMode {
             telemetry.addData("X", currentPose.getX());
             telemetry.addData("Y ", currentPose.getY());
             telemetry.addData("Heading", currentPose.getHeading());
-            telemetry.addData("Left Motor Power", follower.getDrivetrain().getLastFlPower());
-            telemetry.addData("Right Motor Power", follower.getDrivetrain().getLastFrPower());
-            telemetry.addData("Back Left Motor Power", follower.getDrivetrain().getLastBlPower());
-            telemetry.addData("Back Right Motor Power", follower.getDrivetrain().getLastBrPower());
             telemetry.update();
         }
     }
