@@ -436,8 +436,7 @@ public class Follower {
             } else {
                 // Apply reverse feedback if robot drifts past the final point
                 double distancePastEnd = currentPos.minus(targetPoseVec).dot(endTangent).getIn();
-                totalTangentPower =
-                        driveController.calculateEndDistance(-distancePastEnd);
+                totalTangentPower = driveController.calculateEndDistance(-distancePastEnd);
             }
 
             Vector requestedTangentField = unitTangent.times(totalTangentPower);
