@@ -99,6 +99,9 @@ public class HolonomicInterpolator implements HeadingInterpolator {
             case TANGENT_FORWARD:
                 baseHeading = pathTangent.getTheta();
                 break;
+            case TANGENT_BACKWARD:
+                baseHeading = pathTangent.getTheta().plus(Math.PI);
+                break;
             case TANGENT_CUSTOM:
                 baseHeading = pathTangent.getTheta().plus(customOffset);
                 break;
