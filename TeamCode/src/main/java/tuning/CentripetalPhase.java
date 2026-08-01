@@ -41,10 +41,11 @@ public class CentripetalPhase extends TuningPhase {
                 .setAngleUnit(AngleUnit.DEG);
 
         Pose start = factory.pose(0, 0, 0);
-        Pose end = factory.pose(60, 0, 0);
-        forwardArc = factory.path(start, factory.arcPose(30, 30, 40), end)
+        Pose middle = factory.pose(64, 0, 0);
+        Pose end = factory.pose(64, 32, 90);
+        forwardArc = factory.path(start, middle, end)
                 .interpolateWith(InterpolationStyle.TANGENT_FORWARD).quickBuild();
-        backwardArc = factory.path(end, factory.arcPose(30, -30, 40), start)
+        backwardArc = factory.path(end, middle, start)
                 .interpolateWith(InterpolationStyle.TANGENT_BACKWARD).quickBuild();
 
         double fullStrafeAcceleration = context.constants.strafeAccelLimitIn /
