@@ -5,6 +5,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import java.util.concurrent.TimeUnit;
 
 import geometry.AngleUnit;
+import geometry.Pose;
 
 /**
  * Tunes the feedforward coefficients (kV and kA) for both the angular (heading) and
@@ -13,15 +14,15 @@ import geometry.AngleUnit;
  *
  * @author Joel H - 7842a
  */
-public class FeedforwardRefinement extends TuningPhase {
+public class FeedforwardTuner extends TuningPhase {
     private enum Coefficient { ANGULAR_KV, ANGULAR_KA, TRANSLATIONAL_KV, TRANSLATIONAL_KA }
 
-    enum FFSteps { ANGULAR, DRIVE }
-    private FFSteps steps = FFSteps.ANGULAR;
-    BinarySearch searcher;
-    private final ElapsedTime timer;
-    private final TrapezoidProfile driveProfile;
-    private final TrapezoidProfile angularProfile;
+    private enum ManualState { IDLE, ANGULAR, DRIVE }
+    private ManualState manualState = ManualState.IDLE;
+    private BinarySearch search;
+    private final ElapsedTime timer = new ElapsedTime();
+    private TrapezoidProfile driveProfile;
+    private TrapezoidProfile angularProfile;
 
     private Coefficient selected = Coefficient.ANGULAR_KV;
 
@@ -29,22 +30,13 @@ public class FeedforwardRefinement extends TuningPhase {
     private AutoTuneState autoState = AutoTuneState.ANGULAR_KV;
     private double evalTarget = 0.0;
     private double evalActual = 0.0;
+    private boolean evaluationSampled = false;
     private boolean waitingForStart = false;
     private boolean isForward = true;
+    private boolean manualDriveHasRun = false;
 
-    public FeedforwardRefinement(TunerContext context) {
+    public FeedforwardTuner(TunerContext context) {
         super(context);
-        final double EPSILON = 0.2;
-
-        // Target half of our physical limits to ensure we don't saturate the motors during tuning
-        double omegaTarget = context.getFollower().getConstants().angularVelLimitRad / 2;
-        double alphaTarget = context.getFollower().getConstants().angularAccelLimitRad / 2;
-        double vTarget = context.getFollower().getConstants().forwardVelLimitIn / 2;
-        double aTarget = context.getFollower().getConstants().forwardAccelLimitIn / 2;
-
-        timer = new ElapsedTime();
-        angularProfile = new TrapezoidProfile(omegaTarget, alphaTarget);
-        driveProfile = new TrapezoidProfile(vTarget, aTarget);
     }
 
     @Override
@@ -64,33 +56,48 @@ public class FeedforwardRefinement extends TuningPhase {
 
     @Override
     protected void init() {
+        // Target half of the physical limits to avoid motor saturation during tuning.
+        angularProfile = new TrapezoidProfile(
+                context.constants.angularVelLimitRad / 2,
+                context.constants.angularAccelLimitRad / 2
+        );
+        driveProfile = new TrapezoidProfile(
+                context.constants.forwardVelLimitIn / 2,
+                context.constants.forwardAccelLimitIn / 2
+        );
+
         timer.reset();
-        if (!manualMode) {
+        isForward = true;
+        manualDriveHasRun = false;
+        if (manualMode) {
+            manualState = ManualState.IDLE;
+            context.getFollower().stop();
+        } else {
             autoState = AutoTuneState.ANGULAR_KV;
             waitingForStart = false;
-            isForward = true;
-            setupSearcherForState();
+            setupSearchForState();
         }
     }
 
     /**
      * Initializes the binary search boundaries based on the current coefficient being tuned.
      */
-    private void setupSearcherForState() {
+    private void setupSearchForState() {
+        resetEvaluation();
         switch(autoState) {
             case ANGULAR_KV:
                 // Angular limits are typically larger (e.g. 0.1 to 0.5)
-                searcher = new BinarySearch(0.0001, 0.2, 0.0001);
+                search = new BinarySearch(0.0001, 0.2, 0.0001);
                 break;
             case ANGULAR_KA:
-                searcher = new BinarySearch(0.0001, 0.2, 0.0001);
+                search = new BinarySearch(0.0001, 0.2, 0.0001);
                 break;
             case TRANSLATIONAL_KV:
                 // Translational limits are usually very small (e.g. 0.015) because they multiply by inches/sec
-                searcher = new BinarySearch(0.0001, 0.2, 0.00001);
+                search = new BinarySearch(0.0001, 0.2, 0.00001);
                 break;
             case TRANSLATIONAL_KA:
-                searcher = new BinarySearch(0.0001, 0.2, 0.00001);
+                search = new BinarySearch(0.0001, 0.2, 0.00001);
                 break;
             case DONE:
                 break;
@@ -98,17 +105,23 @@ public class FeedforwardRefinement extends TuningPhase {
         applyGuess();
     }
 
+    private void resetEvaluation() {
+        evalActual = Double.NaN;
+        evalTarget = Double.NaN;
+        evaluationSampled = false;
+    }
+
     /**
-     * Applies the current guess from the binary searcher to the actual robot constants.
+     * Applies the current binary-search guess to the shared tuning constants.
      */
     private void applyGuess() {
-        if (searcher == null) { return; }
-        double guess = searcher.getGuess();
+        if (search == null) { return; }
+        double guess = search.getGuess();
         switch (autoState) {
-            case ANGULAR_KV: context.getFollower().getConstants().angularKV = guess; break;
-            case ANGULAR_KA: context.getFollower().getConstants().angularKA = guess; break;
-            case TRANSLATIONAL_KV: context.getFollower().getConstants().translationalKV = guess; break;
-            case TRANSLATIONAL_KA: context.getFollower().getConstants().translationalKA = guess; break;
+            case ANGULAR_KV: context.constants.angularKV = guess; break;
+            case ANGULAR_KA: context.constants.angularKA = guess; break;
+            case TRANSLATIONAL_KV: context.constants.translationalKV = guess; break;
+            case TRANSLATIONAL_KA: context.constants.translationalKA = guess; break;
             default: break;
         }
     }
@@ -126,6 +139,13 @@ public class FeedforwardRefinement extends TuningPhase {
         public TrapezoidProfile(double vel, double accel) {
             this.vel = Math.abs(vel);
             this.accel = Math.abs(accel);
+
+            if (!Double.isFinite(this.vel) || !Double.isFinite(this.accel) ||
+                    this.vel <= 0.0 || this.accel <= 0.0) {
+                throw new IllegalArgumentException(
+                        "Trapezoid profile velocity and acceleration must be finite and positive."
+                );
+            }
 
             // Phase 1: Ramping up (v = at -> t = v/a)
             this.tAccelEnd = this.vel / this.accel;
@@ -193,20 +213,20 @@ public class FeedforwardRefinement extends TuningPhase {
         double change = manualChange();
         if (change != 0.0) {
             if (selected == Coefficient.ANGULAR_KV) {
-                context.getFollower().getConstants().angularKV = Math.max(
-                        0.0, context.getFollower().getConstants().angularKV + change
+                context.constants.angularKV = Math.max(
+                        0.0, context.constants.angularKV + change
                 );
             } else if (selected == Coefficient.ANGULAR_KA) {
-                context.getFollower().getConstants().angularKA = Math.max(
-                        0.0, context.getFollower().getConstants().angularKA + change
+                context.constants.angularKA = Math.max(
+                        0.0, context.constants.angularKA + change
                 );
             } else if (selected == Coefficient.TRANSLATIONAL_KV) {
-                context.getFollower().getConstants().translationalKV = Math.max(
-                        0.0, context.getFollower().getConstants().translationalKV + change
+                context.constants.translationalKV = Math.max(
+                        0.0, context.constants.translationalKV + change
                 );
             } else if (selected == Coefficient.TRANSLATIONAL_KA) {
-                context.getFollower().getConstants().translationalKA = Math.max(
-                        0.0, context.getFollower().getConstants().translationalKA + change
+                context.constants.translationalKA = Math.max(
+                        0.0, context.constants.translationalKA + change
                 );
             }
         }
@@ -215,49 +235,64 @@ public class FeedforwardRefinement extends TuningPhase {
             return true;
         }
 
-        context.getFollower().getLocalizer().update();
-        double angularVel = context.getFollower().getLocalizer().getVel().getHeading(AngleUnit.RAD);
-        double driveVel = context.getFollower().getLocalizer().getVel().getVec().getMag().getIn();
-
-        // Ensure we only run the profile within its bounds
-        boolean working = steps == FFSteps.ANGULAR && timer.time(TimeUnit.SECONDS) <= angularProfile.getTotalTime()
-                || steps == FFSteps.DRIVE && timer.time(TimeUnit.SECONDS) <= driveProfile.getTotalTime();
-
-        if (opMode.gamepad1.xWasPressed() && !working) {
-            steps = FFSteps.ANGULAR;
-            timer.reset();
-        } else if (opMode.gamepad1.yWasPressed() && !working) {
-            steps = FFSteps.DRIVE;
-            timer.reset();
-        }
+        Pose velocity = context.getFollower().getVelocity();
+        double angularVel = velocity.getHeading(AngleUnit.RAD);
+        double driveVel = Math.abs(velocity.getX().getIn());
 
         double time_sec = timer.time(TimeUnit.SECONDS);
+        boolean working = manualState == ManualState.ANGULAR &&
+                time_sec < angularProfile.getTotalTime() || manualState == ManualState.DRIVE &&
+                time_sec < driveProfile.getTotalTime();
+
+        if (!working && manualState != ManualState.IDLE) {
+            manualState = ManualState.IDLE;
+            context.getFollower().stop();
+        }
+
+        if (opMode.gamepad1.xWasPressed() && !working) {
+            manualState = ManualState.ANGULAR;
+            timer.reset();
+            working = true;
+        } else if (opMode.gamepad1.yWasPressed() && !working) {
+            manualState = ManualState.DRIVE;
+            if (manualDriveHasRun) {
+                isForward = !isForward;
+            } else {
+                manualDriveHasRun = true;
+            }
+            timer.reset();
+            working = true;
+        }
+
+        time_sec = timer.time(TimeUnit.SECONDS);
         double targetVel = 0.0;
         double currentVel = 0.0;
 
-        switch (steps) {
+        switch (working ? manualState : ManualState.IDLE) {
+            case IDLE:
+                context.getFollower().stop();
+                break;
             case ANGULAR:
                 targetVel = angularProfile.getVel(time_sec);
                 currentVel = angularVel;
                 double angularPow =
-                        context.getFollower().getConstants().angularKV * targetVel +
-                                context.getFollower().getConstants().angularKA * angularProfile.getAccel(time_sec) +
-                                context.getFollower().getConstants().angularCoeffs.kS;
-                context.getFollower().getDrivetrain().drive(0.0,0.0, angularPow);
+                        context.constants.angularKV * targetVel +
+                                context.constants.angularKA * angularProfile.getAccel(time_sec) +
+                                context.constants.angularCoeffs.kS;
+                context.getFollower().getDrivetrain().moveWithVectors(0.0, 0.0, angularPow);
                 break;
             case DRIVE:
                 targetVel = driveProfile.getVel(time_sec);
                 currentVel = driveVel;
                 double drivePow =
-                        context.getFollower().getConstants().translationalKV * targetVel +
-                                context.getFollower().getConstants().translationalKA * driveProfile.getAccel(time_sec) +
-                                context.getFollower().getConstants().translationalCoeffs.kS;
-                context.getFollower().getDrivetrain().drive(drivePow, 0.0, 0.0);
+                        context.constants.translationalKV * targetVel +
+                                context.constants.translationalKA * driveProfile.getAccel(time_sec) +
+                                context.constants.translationalCoeffs.kS;
+                double direction = isForward ? 1.0 : -1.0;
+                context.getFollower().getDrivetrain().moveWithVectors(
+                        drivePow * direction, 0.0, 0.0
+                );
                 break;
-        }
-
-        if (opMode.gamepad1.xWasPressed() && timer.time(TimeUnit.SECONDS) > angularProfile.getTotalTime()) {
-            timer.reset();
         }
 
         context.getTelemetry().addData("Selected", selected.toString());
@@ -267,8 +302,18 @@ public class FeedforwardRefinement extends TuningPhase {
         context.getTelemetry().addLine("Dpad Left/Right: Change increment");
         context.getTelemetry().addLine("LB/RB: select Value to tune");
         context.getTelemetry().addLine("Target Vel: " + targetVel);
-        context.getTelemetry().addLine("Current Vel: " + currentVel + (steps == FFSteps.ANGULAR ? " rad/s" : " in/s"));
-        context.getTelemetry().addLine("Current velocity " + ((currentVel >= targetVel) ? "> target" : "< target"));
+        context.getTelemetry().addLine("Current Vel: " + currentVel +
+                (manualState == ManualState.ANGULAR ? " rad/s" :
+                        manualState == ManualState.DRIVE ? " in/s" : ""));
+        if (manualState == ManualState.DRIVE) {
+            context.getTelemetry().addData("Drive direction", isForward ? "FORWARD" : "BACKWARD");
+        }
+        if (working) {
+            context.getTelemetry().addLine("Current velocity " +
+                    ((currentVel >= targetVel) ? "> target" : "< target"));
+        } else {
+            context.getTelemetry().addData("Routine", "IDLE");
+        }
         context.getTelemetry().addLine("X: Run and edit angular routine");
         context.getTelemetry().addLine("Y: Run and edit drive routine");
         context.getTelemetry().addLine("A: Save");
@@ -298,16 +343,15 @@ public class FeedforwardRefinement extends TuningPhase {
             return false;
         }
 
-        context.getFollower().getLocalizer().update();
         double time_sec = timer.time(TimeUnit.SECONDS);
 
         boolean isAngular = autoState == AutoTuneState.ANGULAR_KV || autoState == AutoTuneState.ANGULAR_KA;
         TrapezoidProfile profile = isAngular ? angularProfile : driveProfile;
 
         // Use absolute values so comparisons hold regardless of whether we are driving forward or backwards
-        double currentVel = isAngular ?
-                Math.abs(context.getFollower().getLocalizer().getVel().getHeading(AngleUnit.RAD)) :
-                Math.abs(context.getFollower().getLocalizer().getVel().getVec().getMag().getIn());
+        Pose velocity = context.getFollower().getVelocity();
+        double currentVel = isAngular ? Math.abs(velocity.getHeading(AngleUnit.RAD)) :
+                Math.abs(velocity.getX().getIn());
 
         double targetVel = profile.getVel(time_sec);
 
@@ -319,12 +363,14 @@ public class FeedforwardRefinement extends TuningPhase {
             if (time_sec >= profile.getAccelEnd() && time_sec < profile.getCruiseEnd()) {
                 evalActual = currentVel;
                 evalTarget = targetVel;
+                evaluationSampled = true;
             }
         } else {
             // kA targets acceleration, so we sample during the ramping up phase
             if (time_sec > 0 && time_sec < profile.getAccelEnd()) {
                 evalActual = currentVel;
                 evalTarget = targetVel;
+                evaluationSampled = true;
             }
         }
 
@@ -332,34 +378,46 @@ public class FeedforwardRefinement extends TuningPhase {
         if (time_sec <= profile.getTotalTime()) {
             if (isAngular) {
                 double angularPow =
-                        context.getFollower().getConstants().angularKV * targetVel +
-                                context.getFollower().getConstants().angularKA * profile.getAccel(time_sec) +
-                                context.getFollower().getConstants().angularCoeffs.kS;
-                context.getFollower().getDrivetrain().drive(0.0, 0.0, angularPow);
+                        context.constants.angularKV * targetVel +
+                                context.constants.angularKA * profile.getAccel(time_sec) +
+                                context.constants.angularCoeffs.kS;
+                context.getFollower().getDrivetrain().moveWithVectors(0.0, 0.0, angularPow);
             } else {
                 double drivePow =
-                        context.getFollower().getConstants().translationalKV * targetVel +
-                                context.getFollower().getConstants().translationalKA * profile.getAccel(time_sec) +
-                                context.getFollower().getConstants().translationalCoeffs.kS;
+                        context.constants.translationalKV * targetVel +
+                                context.constants.translationalKA * profile.getAccel(time_sec) +
+                                context.constants.translationalCoeffs.kS;
 
                 // Multiply by direction to physically alternate driving forward/backward
                 double direction = isForward ? 1.0 : -1.0;
-                context.getFollower().getDrivetrain().drive(drivePow * direction, 0.0, 0.0);
+                context.getFollower().getDrivetrain().moveWithVectors(
+                        drivePow * direction, 0.0, 0.0
+                );
             }
         } else {
             // Profile complete, kill power
-            context.getFollower().getDrivetrain().drive(0.0, 0.0, 0.0);
+            context.getFollower().stop();
 
             // Wait an extra 0.5 seconds for the physical robot to stop oscillating before evaluating
             if (time_sec > profile.getTotalTime() + 0.5) {
+
+                if (!evaluationSampled) {
+                    resetEvaluation();
+                    waitingForStart = !isAngular;
+                    timer.reset();
+                    return false;
+                }
 
                 // If actual velocity missed the target velocity, we need a higher feedforward constant
                 boolean increase = evalActual < evalTarget;
 
                 // updateGuess returns false when the threshold is met
-                boolean converged = !searcher.updateGuess(increase);
+                boolean converged = !search.updateGuess(increase);
 
                 if (converged) {
+                    // updateGuess computes one final midpoint even when it reports convergence.
+                    applyGuess();
+
                     // Move to the next tuning state
                     switch (autoState) {
                         case ANGULAR_KV:
@@ -380,7 +438,7 @@ public class FeedforwardRefinement extends TuningPhase {
                     }
 
                     if (autoState != AutoTuneState.DONE) {
-                        setupSearcherForState();
+                        setupSearchForState();
                     }
                 } else {
                     applyGuess();
@@ -393,12 +451,13 @@ public class FeedforwardRefinement extends TuningPhase {
 
                 // Require user prompt on next frame if we are in a translational state
                 waitingForStart = autoState == AutoTuneState.TRANSLATIONAL_KV || autoState == AutoTuneState.TRANSLATIONAL_KA;
+                resetEvaluation();
                 timer.reset();
             }
         }
 
         context.getTelemetry().addData("AutoTuning State", autoState);
-        context.getTelemetry().addData("Current Guess", searcher != null ? searcher.getGuess() : 0.0);
+        context.getTelemetry().addData("Current Guess", search != null ? search.getGuess() : 0.0);
         context.getTelemetry().addData("Eval Target", evalTarget);
         context.getTelemetry().addData("Eval Actual", evalActual);
         reportResults();
@@ -409,9 +468,9 @@ public class FeedforwardRefinement extends TuningPhase {
 
     @Override
     protected void reportResults() {
-        context.getTelemetry().addData("Angular KV", context.getFollower().getConstants().angularKV);
-        context.getTelemetry().addData("Angular  KA", context.getFollower().getConstants().angularKA);
-        context.getTelemetry().addData("Translational KV", context.getFollower().getConstants().translationalKV);
-        context.getTelemetry().addData("Translational KA", context.getFollower().getConstants().translationalKA);
+        context.getTelemetry().addData("Angular KV", context.constants.angularKV);
+        context.getTelemetry().addData("Angular KA", context.constants.angularKA);
+        context.getTelemetry().addData("Translational KV", context.constants.translationalKV);
+        context.getTelemetry().addData("Translational KA", context.constants.translationalKA);
     }
 }
