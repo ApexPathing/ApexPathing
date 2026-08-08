@@ -29,7 +29,7 @@ public class FollowerConstants {
     private static FollowerConstants instance;
     public BaseDrivetrain.DrivetrainType drivetrainType =
             BaseDrivetrain.DrivetrainType.MECANUM;
-    public PDSCoefficients headingCoeffs = new PDSCoefficients();
+    public PDSCoefficients angularCoeffs = new PDSCoefficients();
     public PDSCoefficients translationalCoeffs = new PDSCoefficients();
 
     public double velocityFeedbackGain = 0.0;
@@ -86,9 +86,9 @@ public class FollowerConstants {
                 json.optString("drivetrainType", "NAD")
         );
 
-        headingCoeffs.setkP(loadDouble(json, "headingP"));
-        headingCoeffs.setkD(loadDouble(json, "headingD"));
-        headingCoeffs.setkS(loadDouble(json, "headingS"));
+        angularCoeffs.setkP(loadDouble(json, "headingP"));
+        angularCoeffs.setkD(loadDouble(json, "headingD"));
+        angularCoeffs.setkS(loadDouble(json, "headingS"));
 
         translationalCoeffs.setkP(loadDouble(json, "translationalP"));
         translationalCoeffs.setkD(loadDouble(json, "translationalD"));
@@ -114,9 +114,9 @@ public class FollowerConstants {
         JSONObject json = new JSONObject();
         try {
             json.put("drivetrainType", drivetrainType.toString());
-            json.put("headingP", headingCoeffs.kP);
-            json.put("headingD", headingCoeffs.kD);
-            json.put("headingS", headingCoeffs.kS);
+            json.put("headingP", angularCoeffs.kP);
+            json.put("headingD", angularCoeffs.kD);
+            json.put("headingS", angularCoeffs.kS);
             json.put("translationalP", translationalCoeffs.kP);
             json.put("translationalD", translationalCoeffs.kD);
             json.put("translationalS", translationalCoeffs.kS);

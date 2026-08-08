@@ -30,8 +30,8 @@ public class FollowerTuner extends LinearOpMode {
      * Tuners are ran in the order of the enum ordinals
      */
     enum Phase {
-        HEADING(HeadingPhase.class, (FollowerConstants constants) ->
-                constants.headingCoeffs.kP != 0.0),
+        HEADiING(HeadingPhase.class, (FollowerConstants constants) ->
+                constants.angularCoeffs.kP != 0.0),
         LIMITS(LimitsPhase.class, (FollowerConstants constants) ->
                 constants.angularKA != 0.0),
         DRIVE(DrivePhase.class, (FollowerConstants constants) ->
