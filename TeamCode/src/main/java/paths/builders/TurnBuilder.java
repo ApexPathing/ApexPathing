@@ -1,7 +1,7 @@
 package paths.builders;
 
 import java.util.ArrayList;
-import java.util.List;
+import java.util.Collection;
 import java.util.function.Consumer;
 
 import core.FollowerConstants;
@@ -14,22 +14,20 @@ import paths.movements.Turn;
 /**
  * A builder class designed to construct a {@link Turn} fluently.
  *
- * <p>
- * This handles stationary point-turns, allowing users to inject mechanical
- * callbacks at specific angles during the rotation.
- * </p>
+ * <p>This handles stationary point-turns, allowing users to inject mechanical callbacks at specific
+ * angles during the rotation.
  *
  * @author DrPixelCat
  */
 public class TurnBuilder {
     private final Pose startPose;
-    private Angle targetHeading = null;
+    private Angle targetHeading;
     private final FollowerConstants constants;
 
     private double angularVelLimitRad;
     private double angularAccelLimitRad;
 
-    private final List<Consumer<Turn>> buildTasks = new ArrayList<>();
+    private final Collection<Consumer<Turn>> buildTasks = new ArrayList<Consumer<Turn>>();
 
     /**
      * Initializes the TurnBuilder with the robot's starting state and loads global limits.
@@ -55,15 +53,15 @@ public class TurnBuilder {
     }
 
     /**
-     * Attaches an executable callback to trigger when the robot passes a specific angle during
-     * the turn.
+     * Attaches an executable callback to trigger when the robot passes a specific angle during the
+     * turn.
      *
-     * @param angle  The angle at which the callback should trigger.
+     * @param angle The angle at which the callback should trigger.
      * @param action The code to execute.
      * @return The current TurnBuilder instance for method chaining.
      */
     public TurnBuilder addAngularCallback(Angle angle, Runnable action) {
-        buildTasks.add(turn -> {
+        buildTasks.add((Turn turn) -> {
             Angle startRad = turn.getStartPose().getHeading();
             Angle endRad = turn.getEndPose().getHeading();
 
@@ -72,10 +70,12 @@ public class TurnBuilder {
 
             if (Math.abs(totalDiff) < 1e-6) {
                 if (Math.abs(targetDiff) > 1e-6) {
+                    // noinspection ConstantExpression
                     throw new IllegalArgumentException("Callback out of bounds: The turn has no " +
                             "rotational distance.");
                 }
-            } else if ((totalDiff * targetDiff < 0) || (Math.abs(targetDiff) > Math.abs(totalDiff))) {
+            } else if (totalDiff * targetDiff < 0 || Math.abs(targetDiff) > Math.abs(totalDiff)) {
+                // noinspection ConstantExpression
                 throw new IllegalArgumentException("Angular callback is outside the sweep range " +
                         "of this turn.");
             }
@@ -94,9 +94,11 @@ public class TurnBuilder {
      */
     public TurnBuilder setAngularVelocityLimit(Angle limit) {
         if (limit.getRad() > constants.angularVelLimitRad) {
+            // noinspection ConstantExpression
             throw new IllegalStateException("The angular velocity limit must be <= the " +
                     "drivetrain's max angular velocity constraint!");
         }
+
         this.angularVelLimitRad = limit.getRad();
         return this;
     }
@@ -109,9 +111,11 @@ public class TurnBuilder {
      */
     public TurnBuilder setAngularAccelerationLimit(Angle limit) {
         if (limit.getRad() > constants.angularAccelLimitRad) {
+            // noinspection ConstantExpression
             throw new IllegalStateException("The angular acceleration limit must be <= the " +
                     "drivetrain's max angular acceleration constraint!");
         }
+
         this.angularAccelLimitRad = limit.getRad();
         return this;
     }
@@ -119,15 +123,13 @@ public class TurnBuilder {
     /** Internal method to compile the turn and execute callback bounds checks. */
     private Turn compileTurn() {
         if (targetHeading == null) {
+            // noinspection ConstantExpression
             throw new IllegalStateException("Cannot build Turn: No target heading was specified! " +
                     "Use .turnTo().");
         }
 
         Turn turn = new Turn(startPose, targetHeading);
-
-        for (Consumer<Turn> task : buildTasks) {
-            task.accept(turn);
-        }
+        for (Consumer<Turn> task : buildTasks) { task.accept(turn); }
 
         return turn;
     }

@@ -1,14 +1,38 @@
 package tuning;
 
-import controllers.PDSController.PDSCoefficients;
+import java.util.function.Supplier;
 
+import geometry.Angle;
+import paths.builders.TurnBuilder;
+import paths.movements.Turn;
+
+/**
+ * Tunes the heading controller used by the follower using a {@link PDSRoutine}. The user can
+ * manually tune the coefficients or run the automatic tuning routine.
+ *
+ * @author Sohum Arora - 22985 Paraducks
+ * @author Dylan B. - 18597 RoboClovers - Delta
+ */
 public class HeadingPhase extends TuningPhase {
-    private PDSRoutine routine;
+    private enum Coefficient { P, D, S }
 
-    public HeadingPhase(TunerContext context) { super(context); }
+    private final Supplier<Turn> testTurn;
+    private final PDSRoutine routine;
+
+    private Coefficient selected = Coefficient.P;
+    private double target = 0.0;
+
+    public HeadingPhase(TunerContext context) {
+        super(context);
+
+        routine = new PDSRoutine(context, PDSRoutine.Axis.HEADING);
+        testTurn = () -> new TurnBuilder(context.getFollower().getPose())
+                .turnTo(Angle.fromDeg(target))
+                .quickBuild();
+    }
 
     @Override
-    protected String getPhaseName() { return "Heading PDS"; }
+    protected String getPhaseName() { return "Heading Controller"; }
 
     @Override
     protected boolean manualTuneIsPossible() { return true; }
@@ -18,29 +42,80 @@ public class HeadingPhase extends TuningPhase {
 
     @Override
     protected void init() {
-        routine = new PDSRoutine(context, PDSRoutine.Axis.HEADING);
+        // We only want to use the existing heading coefficients if we are in manual mode
+        if (manualMode) {
+            context.getFollower().setHeadingCoefficients(context.constants.angularCoeffs);
+            return;
+        }
+
         routine.start();
     }
 
     @Override
-    protected boolean manualUpdate() {
-        return false; // TODO: Implement manual tuning
+    protected boolean autoTuned() {
+        if (!routine.update(context)) {
+            return false;
+        }
+
+        context.constants.angularCoeffs = routine.getCoefficients();
+        return true;
     }
 
     @Override
-    protected boolean automaticUpdate() {
-        boolean done = routine.update(context);
-        if (done) { context.constants.headingCoeffs = routine.getCoefficients(); }
-        return done;
+    protected boolean manualTuned() {
+        if (opMode.gamepad1.leftBumperWasPressed()) {
+            selected = selected == Coefficient.P ? Coefficient.S :
+                    Coefficient.values()[selected.ordinal() - 1];
+        }
+        if (opMode.gamepad1.rightBumperWasPressed()) {
+            selected = selected == Coefficient.S ? Coefficient.P :
+                    Coefficient.values()[selected.ordinal() + 1];
+        }
+
+        double change = manualChange();
+        if (change != 0.0) {
+            if (selected == Coefficient.P) {
+                context.constants.angularCoeffs.kP = Math.max(
+                        0.0, context.constants.angularCoeffs.kP + change
+                );
+            } else if (selected == Coefficient.D) {
+                context.constants.angularCoeffs.kD = Math.max(
+                        0.0, context.constants.angularCoeffs.kD + change
+                );
+            } else if (selected == Coefficient.S) {
+                context.constants.angularCoeffs.kS = Math.max(
+                        0.0, context.constants.angularCoeffs.kS + change
+                );
+            }
+            context.getFollower().setHeadingCoefficients(context.constants.angularCoeffs);
+        }
+
+        if (opMode.gamepad1.xWasPressed() && !context.getFollower().isBusy()) {
+            context.getFollower().follow(testTurn.get());
+            target = -target;
+        }
+
+        if (opMode.gamepad1.aWasPressed()) {
+            return true;
+        }
+
+        context.getTelemetry().addData("Selected", selected.toString());
+        reportResults();
+        context.getTelemetry().addData("Increment", increment);
+        context.getTelemetry().addLine("Dpad Up/Down: Change value");
+        context.getTelemetry().addLine("Dpad Left/Right: Change increment");
+        context.getTelemetry().addLine("LB/RB: select Value to tune");
+        context.getTelemetry().addLine("X: Run test turn");
+        context.getTelemetry().addLine("A: Save");
+        context.getTelemetry().update();
+
+        return false;
     }
 
     @Override
     protected void reportResults() {
-        PDSCoefficients coefficients = context.constants.headingCoeffs;
-        context.getTelemetry().addData(
-                "Heading PDS Coefficients",
-                "P: %.3f, D: %.3f, S: %.3f",
-                coefficients.kP, coefficients.kD, coefficients.kS
-        );
+        context.getTelemetry().addData("Heading P", context.constants.angularCoeffs.kP);
+        context.getTelemetry().addData("Heading D", context.constants.angularCoeffs.kD);
+        context.getTelemetry().addData("Heading S", context.constants.angularCoeffs.kS);
     }
 }

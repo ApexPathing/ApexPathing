@@ -14,6 +14,7 @@ public class TankInterpolator implements HeadingInterpolator {
 
     public TankInterpolator(InterpolationStyle style) {
         if (style == InterpolationStyle.TANGENT_OPTIMAL) {
+            // noinspection ConstantExpression
             throw new IllegalArgumentException("TANGENT_OPTIMAL must be resolved to FORWARD or " +
                     "BACKWARD before runtime instantiation.");
         }

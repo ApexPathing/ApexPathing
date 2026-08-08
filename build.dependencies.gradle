@@ -1,6 +1,16 @@
 repositories {
     mavenCentral()
     google() // Needed for androidx
+
+    maven {
+        url = uri("https://www.jitpack.io")
+    }
+    maven {
+        url = uri("https://repo.dairy.foundation/releases")
+    }
+    maven {
+        url = uri("https://repo.dairy.foundation/snapshots")
+    }
 }
 
 dependencies {

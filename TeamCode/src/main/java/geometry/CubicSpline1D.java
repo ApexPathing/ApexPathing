@@ -3,11 +3,9 @@ package geometry;
 /**
  * Represents a 1D cubic spline for interpolation.
  *
- * <p>
- * This class constructs a cubic spline based on given x and y data points. It provides methods to
- * evaluate the spline and its first and second derivatives at any point within the range of the
+ * <p>This class constructs a cubic spline based on given x and y data points. It provides methods
+ * to evaluate the spline and its first/second derivatives at any point within the range of the
  * input data.
- * </p>
  *
  * @author DrPixelCat - 7842 alum
  */
@@ -30,8 +28,9 @@ public class CubicSpline1D {
         double[] h = new double[n];
         for (int i = 0; i < n; i++) {
             h[i] = x[i + 1] - x[i];
-            if (h[i] <= 0)
+            if (h[i] <= 0) {
                 throw new IllegalArgumentException("x values must be strictly increasing.");
+            }
         }
 
         double[] alpha = new double[n + 1];
@@ -43,13 +42,12 @@ public class CubicSpline1D {
         }
         alpha[n] = -3.0 * (a[n] - a[n - 1]) / h[n - 1];
 
-        double[] l = new double[n + 1];
-        double[] mu = new double[n + 1];
-        double[] z = new double[n + 1];
-
         // Forward Elimination
+        double[] l = new double[n + 1];
         l[0] = 2.0 * h[0];
+        double[] mu = new double[n + 1];
         mu[0] = 0.5;
+        double[] z = new double[n + 1];
         z[0] = alpha[0] / l[0];
 
         for (int i = 1; i < n; i++) {
@@ -58,7 +56,7 @@ public class CubicSpline1D {
             z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
         }
 
-        l[n] = 2.0 * h[n - 1] - h[n - 1] * mu[n - 1];
+        l[n] = h[n - 1] * (2.0 - mu[n - 1]);
         z[n] = (alpha[n] - h[n - 1] * z[n - 1]) / l[n];
         c[n] = z[n];
 
@@ -71,10 +69,10 @@ public class CubicSpline1D {
     }
 
     private int getSegment(double query) {
-        if (query <= x[0]) return 0;
-        if (query >= x[x.length - 1]) return x.length - 2;
+        if (query <= x[0]) { return 0; }
+        if (query >= x[x.length - 1]) { return x.length - 2; }
         for (int i = 0; i < x.length - 1; i++) {
-            if (query >= x[i] && query <= x[i + 1]) return i;
+            if (query >= x[i] && query <= x[i + 1]) { return i; }
         }
         return 0;
     }

@@ -14,7 +14,6 @@ import com.qualcomm.robotcore.util.TypeConversion;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
-import java.util.Objects;
 
 import geometry.Dist;
 import geometry.Pose;
@@ -34,18 +33,18 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
     public enum EncoderDirection { FORWARD, REVERSED }
     public enum GoBildaPods { goBILDA_SWINGARM_POD,  goBILDA_4_BAR_POD }
 
-    public Pinpoint(Constants config, HardwareMap hardwareMap) {
-        super(config);
+    public Pinpoint(Constants constants, HardwareMap hardwareMap) {
+        super(constants);
 
-        pinpoint = hardwareMap.get(Pinpoint.Driver.class, config.name);
-        pinpoint.setOffsets(config.offsets);
-        pinpoint.setEncoderDirections(config.xPodDirection, config.yPodDirection);
-        if (config.customEncoderResolution.getIn() != 0) {
-            pinpoint.setEncoderResolution(config.customEncoderResolution);
+        pinpoint = hardwareMap.get(Driver.class, constants.name);
+        pinpoint.setOffsets(constants.offsets);
+        pinpoint.setEncoderDirections(constants.xPodDirection, constants.yPodDirection);
+        if (constants.customEncoderResolution.getIn() == 0) {
+            pinpoint.setEncoderResolution(constants.encoderResolution);
         } else {
-            pinpoint.setEncoderResolution(config.encoderResolution);
+            pinpoint.setEncoderResolution(constants.customEncoderResolution);
         }
-        if (config.yawScalar != 0) { pinpoint.setYawScalar(config.yawScalar); }
+        if (constants.angularScalar != 0) { pinpoint.setYawScalar(constants.angularScalar); }
         pinpoint.resetPosAndIMU();
     }
 
@@ -58,24 +57,24 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
     }
 
     @Override
-    public void setPose(Pose newPose) {
-        pinpoint.setPosition(newPose);
-    }
+    public void setPose(Pose newPose) { pinpoint.setPosition(newPose); }
 
     /** Configuration class for goBILDA Pinpoint localizer. */
-    public static class Constants extends BaseLocalizerConstants<Constants> {
-        public String name = null;
+    public static class Constants implements BaseLocalizerConstants<Constants> {
+        public String name;
         public Vector offsets = Vector.zero();
         public EncoderDirection xPodDirection = EncoderDirection.FORWARD;
         public EncoderDirection yPodDirection = EncoderDirection.FORWARD;
         public GoBildaPods encoderResolution = GoBildaPods.goBILDA_4_BAR_POD;
         public Dist customEncoderResolution = Dist.zero(); // Overrides encoderResolution if != 0
-        public double yawScalar = 0; // Overrides the default
+        public double angularScalar = 0; // Overrides the default
 
         @Override
         public Pinpoint build(HardwareMap hardwareMap) {
             if (name == null) {
-                throw new IllegalArgumentException("Pinpoint name is not set in the localizer constants.");
+                throw new IllegalArgumentException(
+                        "Pinpoint name is not set in the localizer constants."
+                );
             }
             return new Pinpoint(this, hardwareMap);
         }
@@ -93,27 +92,28 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
         }
 
         /** Sets the direction of the X and Y encoders of the Pinpoint. */
-        public Constants setEncoderDirections(EncoderDirection xPodDirection, EncoderDirection yPodDirection) {
+        public Constants setEncoderDirections(EncoderDirection xPodDirection,
+                                              EncoderDirection yPodDirection) {
             this.xPodDirection = xPodDirection;
             this.yPodDirection = yPodDirection;
             return this;
         }
 
-        /** Sets the encoder resolution of the Pinpoint in ticks per mm using goBILDA pods. */
+        /** Sets the encoder resolution of the Pinpoint in ticks per unit using goBILDA pods. */
         public Constants setEncoderResolution(GoBildaPods encoderResolution) {
             this.encoderResolution = encoderResolution;
             return this;
         }
 
-        /** Sets the encoder resolution of the Pinpoint in ticks per mm. */
+        /** Sets the encoder resolution of the Pinpoint in ticks per unit. */
         public Constants setEncoderResolution(Dist customEncoderResolution) {
             this.customEncoderResolution = customEncoderResolution;
             return this;
         }
 
-        /** Sets the yaw scalar of the Pinpoint. It is not recommended to change this values. */
-        public Constants setYawScalar(double yawScalar) {
-            this.yawScalar = yawScalar;
+        /** Sets the angular scalar of the Pinpoint. It is not recommended to change this values. */
+        public Constants setAngularScalar(double angularScalar) {
+            this.angularScalar = angularScalar;
             return this;
         }
     }
@@ -128,6 +128,7 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
      * @author Ethan Doak - goBILDA
      * @author Dylan B. - 18597 RoboClovers - Delta
      */
+    @SuppressWarnings("ConstantExpression")
     @I2cDeviceType
     @DeviceProperties(
             name = "goBILDA® Pinpoint Odometry Computer",
@@ -161,18 +162,18 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
         }
 
         @Override
-        public Manufacturer getManufacturer() { return Manufacturer.Other; }
-
-        @Override
         protected synchronized boolean doInitialize() {
-            ((LynxI2cDeviceSynch) (deviceClient)).setBusSpeed(LynxI2cDeviceSynch.BusSpeed.FAST_400K);
+            ((LynxI2cDeviceSynch) deviceClient).setBusSpeed(LynxI2cDeviceSynch.BusSpeed.FAST_400K);
             return true;
         }
 
         @Override
+        public Manufacturer getManufacturer() { return Manufacturer.GoBilda; }
+
+        @Override
         public String getDeviceName() { return "goBILDA® Pinpoint Odometry Computer"; }
 
-        // I2C registers
+        /** I2C registers */
         private enum Register {
             DEVICE_ID(1),
             DEVICE_VERSION(2),
@@ -251,7 +252,8 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
         }
 
         /**
-         * Confirm that the number received is a number, and does not include a change above the threshold
+         * Confirm that the number received is a number, and does not include a change above the
+         * threshold
          *
          * @param oldValue the reading from the previous cycle
          * @param newValue the new reading
@@ -259,7 +261,7 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
          * @return newValue if the position is good, oldValue otherwise
          */
         private double isPositionCorrupt(double oldValue, double newValue, int threshold) {
-            boolean noData = (loopTime < 1);
+            boolean noData = loopTime < 1;
             boolean isCorrupt = noData || Double.isNaN(newValue) ||
                     Math.abs(newValue - oldValue) > threshold;
 
@@ -345,7 +347,7 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
          * of samples, and uses those as the gyroscope zero-offset. This takes approximately 0.25
          * seconds.
          */
-        public void resetPosAndIMU() { writeInt(1<<1); }
+        public void resetPosAndIMU() { writeInt(2); }
 
         /**
          * Can reverse the direction of each encoder.
@@ -357,15 +359,15 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
          */
         public void setEncoderDirections(EncoderDirection xEncoder, EncoderDirection yEncoder) {
             if (xEncoder == EncoderDirection.FORWARD) {
-                writeInt(1 << 5);
+                writeInt(32);
             } else if (xEncoder == EncoderDirection.REVERSED) {
-                writeInt(1 << 4);
+                writeInt(16);
             }
 
             if (yEncoder == EncoderDirection.FORWARD) {
-                writeInt(1 << 3);
+                writeInt(8);
             } else if (yEncoder == EncoderDirection.REVERSED) {
-                writeInt(1 << 2);
+                writeInt(4);
             }
         }
 
@@ -377,11 +379,9 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
          */
         public void setEncoderResolution(GoBildaPods pods) {
             if (pods == GoBildaPods.goBILDA_SWINGARM_POD) {
-                writeByteArray(Register.MM_PER_TICK, (floatToByteArray(goBILDA_SWINGARM_POD
-                )));
+                writeByteArray(Register.MM_PER_TICK, floatToByteArray(goBILDA_SWINGARM_POD));
             } else if (pods == GoBildaPods.goBILDA_4_BAR_POD) {
-                writeByteArray(Register.MM_PER_TICK, (floatToByteArray(goBILDA_4_BAR_POD
-                )));
+                writeByteArray(Register.MM_PER_TICK, floatToByteArray(goBILDA_4_BAR_POD));
             }
         }
 
@@ -394,8 +394,7 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
          */
         public void setEncoderResolution(Dist ticksPerUnit) {
             double resolution = ticksPerUnit.getMm();
-            writeByteArray(Register.MM_PER_TICK, (floatToByteArray((float) resolution
-            )));
+            writeByteArray(Register.MM_PER_TICK, floatToByteArray((float) resolution));
         }
 
         /**
@@ -407,8 +406,7 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
          * @param yawOffset A scalar for the robot's heading.
          */
         public void setYawScalar(double yawOffset) {
-            writeByteArray(Register.YAW_SCALAR, (floatToByteArray((float) yawOffset
-            )));
+            writeByteArray(Register.YAW_SCALAR, floatToByteArray((float) yawOffset));
         }
 
         /**
@@ -417,9 +415,10 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
          * @param pos a Pose2D describing the robot's new position.
          */
         public void setPosition(Pose pos) {
-            writeByteArray(Register.X_POSITION, (floatToByteArray((float) pos.getX().getMm())));
-            writeByteArray(Register.Y_POSITION, (floatToByteArray((float) pos.getY().getMm())));
-            writeByteArray(Register.H_ORIENTATION, (floatToByteArray((float) pos.getHeading().getRad())));
+            writeByteArray(Register.X_POSITION, floatToByteArray((float) pos.getX().getMm()));
+            writeByteArray(Register.Y_POSITION, floatToByteArray((float) pos.getY().getMm()));
+            writeByteArray(Register.H_ORIENTATION,
+                    floatToByteArray((float) pos.getHeading().getRad()));
         }
 
         /**

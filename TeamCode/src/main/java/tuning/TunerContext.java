@@ -1,7 +1,5 @@
 package tuning;
 
-import android.os.Environment;
-
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
@@ -12,6 +10,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 
+import core.ApexStorage;
 import core.Follower;
 import core.FollowerConstants;
 
@@ -41,16 +40,13 @@ public class TunerContext {
     public void saveConstants() {
         JSONObject constantsJSON = constants.toJson();
         try {
-            File outputFolder = new File(
-                    Environment.getExternalStorageDirectory().getPath() +
-                            "/FIRST/ApexPathing/"
-            );
+            File outputFolder = ApexStorage.getDirectory();
 
             boolean folderExists = outputFolder.exists();
             if (!folderExists) { folderExists = outputFolder.mkdirs(); }
 
             if (folderExists) {
-                FileWriter fileWriter = new FileWriter(new File(outputFolder, "constants.json"));
+                FileWriter fileWriter = new FileWriter(ApexStorage.getConstantsFile());
                 fileWriter.write(constantsJSON.toString(4));
                 fileWriter.close();
             } else {

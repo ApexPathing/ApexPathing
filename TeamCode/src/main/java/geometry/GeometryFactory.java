@@ -15,6 +15,7 @@ import paths.movements.Turn;
  * @author Dylan B. - 18597 RoboClovers - Delta
  * @author DrPixelCat - 7842 alum
  */
+@SuppressWarnings("ClassNamePrefixedWithPackageName")
 public class GeometryFactory {
     public enum PoseMirror { NONE, X, Y }
 
@@ -120,14 +121,16 @@ public class GeometryFactory {
     // endregion
     // region Paths and turns
 
+    /**
+     * Creates a {@link PathBuilder} from the given poses. The type of PathBuilder returned depends
+     * on whether the factory is configured for holonomic or non-holonomic paths.
+     */
     public PathBuilder<?> path(Pose... poses) {
-        if (isHolonomic) {
-            return new HolonomicPathBuilder(poses);
-        } else {
-            return new TankPathBuilder(poses);
-        }
+        if (isHolonomic) { return new HolonomicPathBuilder(poses); }
+        return new TankPathBuilder(poses);
     }
 
+    /** Creates a {@link TurnBuilder} from the given start pose. */
     public TurnBuilder turn(Pose startPose) { return new TurnBuilder(startPose); }
 
     // endregion

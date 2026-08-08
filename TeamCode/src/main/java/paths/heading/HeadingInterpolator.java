@@ -9,6 +9,7 @@ import geometry.Vector;
  *
  * @author DrPixelCat - 7842 alum
  */
+@SuppressWarnings("ClassNamePrefixedWithPackageName")
 public interface HeadingInterpolator {
     /** Calculates the target heading, f(s). */
     Angle getHeadingTarg(double s, Vector pathTangent, Vector finalTangent);

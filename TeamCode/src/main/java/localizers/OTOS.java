@@ -23,14 +23,14 @@ import geometry.GeometryFactory;
 public class OTOS extends BaseLocalizer<OTOS.Constants> {
     private final Driver otos;
 
-    public OTOS(Constants config, HardwareMap hardwareMap) {
-        super(config);
+    public OTOS(Constants constants, HardwareMap hardwareMap) {
+        super(constants);
 
-        otos = hardwareMap.get(OTOS.Driver.class, config.name);
+        otos = hardwareMap.get(Driver.class, constants.name);
         otos.calibrateAndReset();
-        otos.setOffset(config.offset);
-        otos.setLinearScalar(config.linearScalar);
-        otos.setAngularScalar(config.angularScalar);
+        otos.setOffset(constants.offset);
+        otos.setLinearScalar(constants.linearScalar);
+        otos.setAngularScalar(constants.angularScalar);
     }
 
     @Override
@@ -45,8 +45,8 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
     public void setPose(Pose newPose) { otos.setPosition(newPose); }
 
     /** Configuration class for the Sparkfun OTOS localizer. */
-    public static class Constants extends BaseLocalizerConstants<Constants> {
-        public String name = null;
+    public static class Constants implements BaseLocalizerConstants<Constants> {
+        public String name;
         public Pose offset = Pose.zero();
         public double linearScalar = 1.0;
         public double angularScalar = 1.0;
@@ -54,7 +54,9 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
         @Override
         public OTOS build(HardwareMap hardwareMap) {
             if (this.name == null) {
-                throw new IllegalArgumentException("OTOS name is not set in the localizer constants.");
+                throw new IllegalArgumentException(
+                        "OTOS name is not set in the localizer constants."
+                );
             }
             return new OTOS(this, hardwareMap);
         }
@@ -79,7 +81,8 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
          */
         public Constants setLinearScalar(double linearScalar) {
             if (linearScalar < Driver.MIN_SCALAR || linearScalar > Driver.MAX_SCALAR) {
-                throw new IllegalArgumentException("Linear scalar must be between " + Driver.MIN_SCALAR + " and " + Driver.MAX_SCALAR);
+                throw new IllegalArgumentException("Linear scalar must be between " +
+                        Driver.MIN_SCALAR + " and " + Driver.MAX_SCALAR);
             }
             this.linearScalar = linearScalar;
             return this;
@@ -110,13 +113,14 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
      * @author SparkFun Electronics
      * @author Dylan B. - 18597 RoboClovers Delta
      */
+    @SuppressWarnings("ConstantExpression")
     @I2cDeviceType
     @DeviceProperties(
             name = "SparkFun OTOS",
             xmlTag = "SparkFunOTOS",
             description = "SparkFun Qwiic Optical Tracking Odometry Sensor, optimized for Apex Pathing"
     )
-    private static class Driver extends I2cDeviceSynchDevice<I2cDeviceSynch> {
+    public static class Driver extends I2cDeviceSynchDevice<I2cDeviceSynch> {
         private final GeometryFactory factory = new GeometryFactory()
                 .setDistUnit(DistUnit.IN).setAngleUnit(AngleUnit.RAD);
 
@@ -124,7 +128,7 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
         public static final double MIN_SCALAR = 0.872; // Minimum scalar value for the linear and angular scalars
         public static final double MAX_SCALAR = 1.127; // Maximum scalar value for the linear and angular scalars
 
-        // OTOS register map (not all are listed here because they aren't needed)
+        /** OTOS register map (not all are listed here because they aren't needed) */
         protected static final byte REG_PRODUCT_ID = 0x00;
         protected static final byte REG_SCALAR_LINEAR = 0x04;
         protected static final byte REG_SCALAR_ANGULAR = 0x05;
@@ -132,46 +136,55 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
         protected static final byte REG_OFF_XL = 0x10;
         protected static final byte REG_POS_XL = 0x20;
 
-        // Product ID register value
+        /** Product ID register value*/
         protected static final byte PRODUCT_ID = 0x5F;
 
-        // Conversion factors
+        /** Conversion factors */
         protected static final double DEGREE_TO_RADIAN = Math.PI / 180.0;
         protected static final double METER_TO_INCH = 1.0 / 0.0254;
 
-        // Conversion factor for the linear position registers. 16-bit signed
-        // registers with a max value of 10 meters (~393.7 inches) gives a resolution
-        // of about 0.012 inches
+        /**
+         * Conversion factor for the linear position registers. 16-bit signed registers with a max
+         * value of 10 meters (~393.7 inches) gives a resolution  of about 0.012 inches
+         */
         protected static final double INCH_TO_INT16 = 32768.0 / (10.0 * METER_TO_INCH);
         protected static final double INT16_TO_INCH = 1.0 / INCH_TO_INT16;
 
-        // Conversion factor for the linear velocity registers. 16-bit signed
-        // registers with a max value of 5 mps (~196.85 ips) gives a resolution of about
-        // 0.006 ips
+        /**
+         * Conversion factor for the linear velocity registers. 16-bit signed registers with a max
+         * value of 5 mps (~196.85 ips) gives a resolution of about 0.006 ips
+         */
         protected static final double IPS_TO_INT16 = 32768.0 / (5.0 * METER_TO_INCH);
         protected static final double INT16_TO_IPS = 1.0 / IPS_TO_INT16;
 
-        // Conversion factor for the linear acceleration registers. 16-bit signed
-        // registers with a max value of 157 mps^2 (16 g / ~6177.16 ipss) gives a
-        // resolution of about 0.19 ipss
+        /**
+         * Conversion factor for the linear acceleration registers. 16-bit signed registers with a
+         * max value of 157 mps^2 (16 g / ~6177.16 ipss) gives a resolution of about 0.19 ipss
+         */
         protected static final double IPSS_TO_INT16 = 32768.0 / (16.0 * 9.80665 * METER_TO_INCH);
         protected static final double INT16_TO_IPSS = 1.0 / IPSS_TO_INT16;
 
-        // Conversion factor for the angular position registers. 16-bit signed
-        // registers with a max value of pi radians (180 degrees) gives a resolution
-        // of about 0.00096 radians (0.0055 degrees)
+        /**
+         * Conversion factor for the angular position registers. 16-bit signed registers with a max
+         * value of pi radians (180 degrees) gives a resolution of about 0.00096 radians
+         * (0.0055 degrees)
+         */
         protected static final double RAD_TO_INT16 = 32768.0 / Math.PI;
         protected static final double INT16_TO_RAD = 1.0 / RAD_TO_INT16;
 
-        // Conversion factor for the angular velocity registers. 16-bit signed
-        // registers with a max value of 34.9 rps (2000 dps) gives a resolution of
-        // about 0.0011 rps (0.061 degrees per second)
+        /**
+         * Conversion factor for the angular velocity registers. 16-bit signed registers with a max
+         * value of 34.9 rps (2000 dps) gives a resolution of about 0.0011 rps
+         * (0.061 degrees per second)
+         */
         protected static final double RPS_TO_INT16 = 32768.0 / (2000.0 * DEGREE_TO_RADIAN);
         protected static final double INT16_TO_RPS = 1.0 / RPS_TO_INT16;
 
-        // Conversion factor for the angular acceleration registers. 16-bit signed
-        // registers with a max value of 3141 rps^2 (180000 dps^2) gives a
-        // resolution of about 0.096 rps^2 (5.5 dps^2)
+        /**
+         * Conversion factor for the angular acceleration registers. 16-bit signed registers with a
+         * max value of 3141 rps^2 (180000 dps^2) gives a resolution of about 0.096 rps^2
+         * (5.5 dps^2)
+         */
         protected static final double RPSS_TO_INT16 = 32768.0 / (Math.PI * 1000.0);
         protected static final double INT16_TO_RPSS = 1.0 / RPSS_TO_INT16;
 
@@ -266,24 +279,20 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
 
             // Store raw data in buffer
             rawData[0] = (byte) (rawX & 0xFF);
-            rawData[1] = (byte) ((rawX >> 8) & 0xFF);
+            rawData[1] = (byte) (rawX >> 8 & 0xFF);
             rawData[2] = (byte) (rawY & 0xFF);
-            rawData[3] = (byte) ((rawY >> 8) & 0xFF);
+            rawData[3] = (byte) (rawY >> 8 & 0xFF);
             rawData[4] = (byte) (rawH & 0xFF);
-            rawData[5] = (byte) ((rawH >> 8) & 0xFF);
+            rawData[5] = (byte) (rawH >> 8 & 0xFF);
 
             deviceClient.write(reg, rawData); // Write the raw data to the device
         }
 
         /** @param pose The new position estimate for the robot */
-        public void setPosition(Pose pose) {
-            writePose(pose, REG_POS_XL);
-        }
+        public void setPosition(Pose pose) { writePose(pose, REG_POS_XL); }
 
         /** @param pose Offset of the sensor relative to the center of the robot */
-        public void setOffset(Pose pose) {
-            writePose(pose, REG_OFF_XL);
-        }
+        public void setOffset(Pose pose) { writePose(pose, REG_OFF_XL); }
 
         /**
          * Updates the position, velocity, and acceleration estimates from the OTOS. This should be

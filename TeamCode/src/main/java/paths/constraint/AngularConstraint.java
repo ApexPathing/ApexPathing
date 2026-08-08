@@ -10,11 +10,11 @@ import geometry.Angle;
  */
 public class AngularConstraint implements PathConstraint {
     private double s;
-    private final ConstraintType type;
+    private final Type type;
 
     private final double value_rad;
 
-    public AngularConstraint(double s, ConstraintType type, Angle value) {
+    public AngularConstraint(double s, Type type, Angle value) {
         this.s = s;
         this.type = type;
         this.value_rad = value.getRad();
@@ -27,7 +27,8 @@ public class AngularConstraint implements PathConstraint {
     public void setS(double s) { this.s = s; }
 
     @Override
-    public ConstraintType getType() { return type; }
+    public Type getType() { return type; }
 
+    @SuppressWarnings("PublicMethodNotExposedInInterface")
     public double getValueRad() { return value_rad; }
 }

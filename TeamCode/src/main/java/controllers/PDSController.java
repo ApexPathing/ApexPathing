@@ -13,20 +13,16 @@ import geometry.Angle;
  * static forces)</li>
  * </ul>
  *
- * <p>
- * The controller uses a soft sign function to smooth the kS term, which helps prevent
+ * <p>The controller uses a soft sign function to smooth the kS term, which helps prevent
  * overshooting and oscillation.
- * </p>
  *
- * <p>
- * Special thanks to Wolfpack Machina (18438) for inspiration for this controller
- * </p>
+ * <p>Special thanks to Wolfpack Machina (18438) for inspiration for this controller
  *
  * @author Dylan B. - 18597 RoboClovers - Delta
  * @author DrPixelCat - 7842 alum
  */
 public class PDSController {
-    // TODO: I checked these on Desmos and it looks good, but they might need to be changed
+    /** TODO: I checked these on Desmos and it looks good, but they might need to be changed */
     public static final double LINEAR_SMOOTHING_CONSTANT = 0.7; // In
     public static final double ANGULAR_SMOOTHING_CONSTANT = 0.07; // Rad
     private double smoothingConstant = LINEAR_SMOOTHING_CONSTANT;
@@ -103,16 +99,16 @@ public class PDSController {
      * @param error The calculated error (Target - Current)
      * @return The control output
      */
-    public synchronized double calculate(double error) {
+    public double calculate(double error) {
         long currentNano = System.nanoTime();
 
-        // Nano seconds to seconds
+        // Nanoseconds to seconds
         double deltaTime = (currentNano - lastTimestamp) / 1_000_000_000.0;
 
         // Detect if loop is too fast (div by zero risk) or too slow (integral/derivative spike)
         timeAnomaly = deltaTime < 1E-6 || deltaTime > 0.15;
 
-        double actualError = angularController ? Angle.normalize(error) : error; // 0 to 2pi
+        double actualError = angularController ? Angle.wrap(error) : error; // -pi to pi for angular
 
         if (firstRun) {
             lastError = actualError; // Prevents derivative kick from 0
@@ -120,9 +116,9 @@ public class PDSController {
             firstRun = false;
         }
 
-        double p = this.coeffs.kP * error;
-        double d = this.coeffs.kD * (timeAnomaly ? 0.0 : (error - lastError) / deltaTime);
-        double s = this.coeffs.kS * (error / (Math.abs(error) + smoothingConstant));
+        double p = this.coeffs.kP * actualError;
+        double d = this.coeffs.kD * (timeAnomaly ? 0.0 : (actualError - lastError) / deltaTime);
+        double s = this.coeffs.kS * (actualError / (Math.abs(actualError) + smoothingConstant));
 
         lastTimestamp = currentNano;
         lastError = actualError;

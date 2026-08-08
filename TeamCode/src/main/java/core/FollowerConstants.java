@@ -1,7 +1,5 @@
 package core;
 
-import android.os.Environment;
-
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -20,21 +18,23 @@ import controllers.PDSController.PDSCoefficients;
  * @author DrPixelCat - 7842 alum
  */
 public class FollowerConstants {
+    /**
+     * Note to developers:
+     * If you want to add new constants, create the variable here and add it to the loadValues() and
+     * toJson() methods. This will ensure that the new constants are loaded from the JSON file and
+     * saved back to it.
+     */
     private static FollowerConstants instance;
-    /* Note to developers:
-    If you want to add new constants, create the variable here and add it to the loadValues() and
-    toJson() methods. This will ensure that the new constants are loaded from the JSON file and
-    saved back to it. */
     public BaseDrivetrain.DrivetrainType drivetrainType =
             BaseDrivetrain.DrivetrainType.MECANUM;
-    public PDSCoefficients headingCoeffs = new PDSCoefficients();
+    public PDSCoefficients angularCoeffs = new PDSCoefficients();
     public PDSCoefficients translationalCoeffs = new PDSCoefficients();
 
     public double velocityFeedbackGain = 0.0;
     public double angularVelocityFeedbackGain = 0.0;
     public double translationalKV = 0.0, translationalKA = 0.0;
     public double angularKV = 0.0, angularKA = 0.0;
-    public double Kcentripetal = 0.0;
+    public double kCentripetal = 0.0;
 
     public double forwardVelLimitIn = 0.0;
     public double forwardAccelLimitIn = 0.0;
@@ -61,18 +61,18 @@ public class FollowerConstants {
     }
 
     public void reload() {
-        File file = new File(
-                Environment.getExternalStorageDirectory().getPath() +
-                        "/FIRST/ApexPathing/constants.json"
-        );
-        if (!file.exists()) return;
+        File file = ApexStorage.getConstantsFile();
+        if (!file.exists()) { return; }
 
         JSONObject json;
         try {
             BufferedReader reader = new BufferedReader(new FileReader(file));
             StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) sb.append(line);
+            String line = reader.readLine();
+            while (line != null) {
+                sb.append(line);
+                line = reader.readLine();
+            }
             reader.close();
             json = new JSONObject(sb.toString());
         } catch (Exception e) {
@@ -83,9 +83,9 @@ public class FollowerConstants {
                 json.optString("drivetrainType", "NAD")
         );
 
-        headingCoeffs.setkP(loadDouble(json, "headingP"));
-        headingCoeffs.setkD(loadDouble(json, "headingD"));
-        headingCoeffs.setkS(loadDouble(json, "headingS"));
+        angularCoeffs.setkP(loadDouble(json, "headingP"));
+        angularCoeffs.setkD(loadDouble(json, "headingD"));
+        angularCoeffs.setkS(loadDouble(json, "headingS"));
 
         translationalCoeffs.setkP(loadDouble(json, "translationalP"));
         translationalCoeffs.setkD(loadDouble(json, "translationalD"));
@@ -97,7 +97,7 @@ public class FollowerConstants {
         angularKA = loadDouble(json, "angularKA");
         velocityFeedbackGain = loadDouble(json, "velocityFeedbackGain");
         angularVelocityFeedbackGain = loadDouble(json, "angularVelocityFeedbackGain");
-        Kcentripetal = loadDouble(json, "Kcentripetal");
+        kCentripetal = loadDouble(json, "kCentripetal");
 
         forwardVelLimitIn = loadDouble(json, "forwardVelLimitIn");
         forwardAccelLimitIn = loadDouble(json, "forwardAccelLimitIn");
@@ -111,9 +111,9 @@ public class FollowerConstants {
         JSONObject json = new JSONObject();
         try {
             json.put("drivetrainType", drivetrainType.toString());
-            json.put("headingP", headingCoeffs.kP);
-            json.put("headingD", headingCoeffs.kD);
-            json.put("headingS", headingCoeffs.kS);
+            json.put("headingP", angularCoeffs.kP);
+            json.put("headingD", angularCoeffs.kD);
+            json.put("headingS", angularCoeffs.kS);
             json.put("translationalP", translationalCoeffs.kP);
             json.put("translationalD", translationalCoeffs.kD);
             json.put("translationalS", translationalCoeffs.kS);
@@ -123,7 +123,7 @@ public class FollowerConstants {
             json.put("angularKA", angularKA);
             json.put("velocityFeedbackGain", velocityFeedbackGain);
             json.put("angularVelocityFeedbackGain", angularVelocityFeedbackGain);
-            json.put("Kcentripetal", Kcentripetal);
+            json.put("kCentripetal", kCentripetal);
             json.put("forwardVelLimitIn", forwardVelLimitIn);
             json.put("forwardAccelLimitIn", forwardAccelLimitIn);
             json.put("strafeVelLimitIn", strafeVelLimitIn);

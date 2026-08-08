@@ -7,6 +7,7 @@ import geometry.Angle;
  *
  * @author DrPixelCat - 7842 alum
  */
+@SuppressWarnings("ClassNamePrefixedWithPackageName")
 public class HeadingNode implements Comparable<HeadingNode> {
     public final double pct;
     public final Angle target;

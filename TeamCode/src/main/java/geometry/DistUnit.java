@@ -11,11 +11,11 @@ public enum DistUnit {
     /** Foot */
     FT(12.0),
     /** Millimeter */
-    MM(1.0 / 25.4),
+    @SuppressWarnings("ConstantExpression") MM(1.0 / 25.4),
     /** Centimeter */
-    CM(1.0 / 2.54),
+    @SuppressWarnings("ConstantExpression") CM(1.0 / 2.54),
     /** Meter */
-    M(1.0 / 0.0254);
+    @SuppressWarnings("ConstantExpression") M(1.0 / 0.0254);
 
     private final double inchesPerUnit;
 

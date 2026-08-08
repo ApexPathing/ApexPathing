@@ -71,20 +71,21 @@ public class TwoWheel extends BaseLocalizer<TwoWheel.Constants> {
         forwardPod.reset();
     }
 
-    public static class Constants extends BaseLocalizerConstants<Constants> {
-        public String forwardPodName = null;
-        public String strafePodName = null;
-        public String imuName = null;
-        public RevHubOrientationOnRobot hubOrientation = null;
+    public static class Constants implements BaseLocalizerConstants<Constants> {
+        public String forwardPodName;
+        public String strafePodName;
+        public String imuName;
+        public RevHubOrientationOnRobot hubOrientation;
         public Vector offsets = Vector.zero();
         public double ticksPerInch = 1.0;
 
         @Override
         public BaseLocalizer<?> build(HardwareMap hardwareMap) {
             if (this.forwardPodName == null || this.strafePodName == null) {
+                // noinspection ConstantExpression
                 throw new IllegalArgumentException(
-                        "You must call setForwardPodName and setStrafePodName to set the names of " +
-                                "the motor ports that hold the odometry pod encoders."
+                        "You must call setForwardPodName and setStrafePodName to set the names " +
+                                "of the motor ports that hold the odometry pod encoders."
                 );
             }
 
@@ -95,9 +96,10 @@ public class TwoWheel extends BaseLocalizer<TwoWheel.Constants> {
             }
 
             if (this.hubOrientation == null) {
+                // noinspection ConstantExpression
                 throw new IllegalArgumentException(
-                        "You must call setHubOrientation to set the orientation of the control hub " +
-                                "on the robot"
+                        "You must call setHubOrientation to set the orientation of the control " +
+                                "hub on the robot"
                 );
             }
 

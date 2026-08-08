@@ -24,7 +24,7 @@ public abstract class PathBuilder<T extends PathBuilder<T>> {
     protected InterpolationStyle style = InterpolationStyle.TANGENT_FORWARD;
 
     final Pose[] rawPoses;
-    final List<Runnable> buildTasks = new ArrayList<>();
+    final List<Runnable> buildTasks = new ArrayList<Runnable>();
 
     /**
      * Creates a new PathBuilder using the provided poses.
@@ -46,7 +46,8 @@ public abstract class PathBuilder<T extends PathBuilder<T>> {
 
     /**
      * Adds a kinematic constraint to the path at a specific distance percentage.
-     * <p><strong> NOTE: Only velocity can be limited on a quickBuild </strong></p>
+     *
+     * <p><strong> NOTE: Only velocity can be limited on a quickBuild.</strong>
      *
      * @param constraint The {@link PathConstraint} to be added to the path
      * @return The current PathBuilder instance for method chaining.
@@ -180,7 +181,7 @@ public abstract class PathBuilder<T extends PathBuilder<T>> {
      * Builds the path geometry and solves a complete kinematically constrained feedforward
      * motion profile.
      *
-     * @return The constructed Path with a fully optimized FeedforwardLut attached.
+     * @return The constructed Path with a fully optimized Feedforward LUT attached.
      */
     public abstract Path profiledBuild();
 }
