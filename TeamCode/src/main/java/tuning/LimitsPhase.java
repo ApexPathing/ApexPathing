@@ -38,20 +38,21 @@ public class LimitsPhase extends TuningPhase {
 
     private static final LimitTrial[] TRIALS = LimitTrial.values();
 
-    private static final double RUN_TIME = 2000.0;
-    private static final double SETTLE_TIME = 800.0;
+    private static final double RUN_TIME = 1250.0;
+    private static final double SETTLE_TIME = 1000.0;
     public static final double MARGIN_MULTIPLIER = 0.95;
 
     private final ElapsedTime timer = new ElapsedTime();
     private final double[][] maxima = new double[TRIALS.length][2];
 
     private PDSController headingHoldController;
-    private LimitStage stage = LimitStage.RUNNING;
+    private LimitStage stage = LimitStage.SETTLING;
     private int trial = 0;
     private double heldHeading = 0;
 
     public LimitsPhase(TunerContext context) {
         super(context);
+        this.context.getFollower().getDrivetrain().getConstants().maxPower = 1.0;
 
         for (double[] maximum : maxima) {
             maximum[0] = 0.0;
@@ -70,8 +71,9 @@ public class LimitsPhase extends TuningPhase {
 
     @Override
     protected void init() {
-        headingHoldController = new PDSController(context.constants.headingCoeffs);
+        headingHoldController = new PDSController(context.constants.angularCoeffs);
         headingHoldController.setAngularController();
+        timer.reset();
     }
 
     private void runTrial() {

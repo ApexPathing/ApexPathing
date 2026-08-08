@@ -20,7 +20,7 @@ public class HeadingPhase extends TuningPhase {
     private final PDSRoutine routine;
 
     private Coefficient selected = Coefficient.P;
-    private double target = 90.0;
+    private double target = 0.0;
 
     public HeadingPhase(TunerContext context) {
         super(context);
@@ -44,7 +44,7 @@ public class HeadingPhase extends TuningPhase {
     protected void init() {
         // We only want to use the existing heading coefficients if we are in manual mode
         if (manualMode) {
-            context.getFollower().setHeadingCoefficients(context.constants.headingCoeffs);
+            context.getFollower().setHeadingCoefficients(context.constants.angularCoeffs);
             return;
         }
 
@@ -57,7 +57,7 @@ public class HeadingPhase extends TuningPhase {
             return false;
         }
 
-        context.constants.headingCoeffs = routine.getCoefficients();
+        context.constants.angularCoeffs = routine.getCoefficients();
         return true;
     }
 
@@ -75,18 +75,19 @@ public class HeadingPhase extends TuningPhase {
         double change = manualChange();
         if (change != 0.0) {
             if (selected == Coefficient.P) {
-                context.constants.headingCoeffs.kP = Math.max(
-                        0.0, context.constants.headingCoeffs.kP + change
+                context.constants.angularCoeffs.kP = Math.max(
+                        0.0, context.constants.angularCoeffs.kP + change
                 );
             } else if (selected == Coefficient.D) {
-                context.constants.headingCoeffs.kD = Math.max(
-                        0.0, context.constants.headingCoeffs.kD + change
+                context.constants.angularCoeffs.kD = Math.max(
+                        0.0, context.constants.angularCoeffs.kD + change
                 );
             } else if (selected == Coefficient.S) {
-                context.constants.headingCoeffs.kS = Math.max(
-                        0.0, context.constants.headingCoeffs.kS + change
+                context.constants.angularCoeffs.kS = Math.max(
+                        0.0, context.constants.angularCoeffs.kS + change
                 );
             }
+            context.getFollower().setHeadingCoefficients(context.constants.angularCoeffs);
         }
 
         if (opMode.gamepad1.xWasPressed() && !context.getFollower().isBusy()) {
@@ -101,11 +102,11 @@ public class HeadingPhase extends TuningPhase {
         context.getTelemetry().addData("Selected", selected.toString());
         reportResults();
         context.getTelemetry().addData("Increment", increment);
-        context.getTelemetry().addLine("Dpad Up/Down: change value");
-        context.getTelemetry().addLine("Dpad Left/Right: change increment");
-        context.getTelemetry().addLine("LB/RB: select value to tune");
-        context.getTelemetry().addLine("X: test turn");
-        context.getTelemetry().addLine("A: save");
+        context.getTelemetry().addLine("Dpad Up/Down: Change value");
+        context.getTelemetry().addLine("Dpad Left/Right: Change increment");
+        context.getTelemetry().addLine("LB/RB: select Value to tune");
+        context.getTelemetry().addLine("X: Run test turn");
+        context.getTelemetry().addLine("A: Save");
         context.getTelemetry().update();
 
         return false;
@@ -113,8 +114,8 @@ public class HeadingPhase extends TuningPhase {
 
     @Override
     protected void reportResults() {
-        context.getTelemetry().addData("Heading P", context.constants.headingCoeffs.kP);
-        context.getTelemetry().addData("Heading D", context.constants.headingCoeffs.kD);
-        context.getTelemetry().addData("Heading S", context.constants.headingCoeffs.kS);
+        context.getTelemetry().addData("Heading P", context.constants.angularCoeffs.kP);
+        context.getTelemetry().addData("Heading D", context.constants.angularCoeffs.kD);
+        context.getTelemetry().addData("Heading S", context.constants.angularCoeffs.kS);
     }
 }

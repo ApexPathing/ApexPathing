@@ -93,6 +93,7 @@ public class DrivePhase extends TuningPhase {
                         0.0, context.constants.translationalCoeffs.kS + change
                 );
             }
+            context.getFollower().setDriveCoefficients(context.constants.translationalCoeffs);
         }
 
         if (opMode.gamepad1.xWasPressed() && !context.getFollower().isBusy()) {
@@ -105,13 +106,14 @@ public class DrivePhase extends TuningPhase {
         }
 
         context.getTelemetry().addData("Selected", selected.toString());
+        context.getTelemetry().addData("Target", target);
         reportResults();
         context.getTelemetry().addData("Increment", increment);
-        context.getTelemetry().addLine("Dpad Up/Down: change value");
-        context.getTelemetry().addLine("Dpad Left/Right: change increment");
-        context.getTelemetry().addLine("LB/RB: select value");
-        context.getTelemetry().addLine("X: test turn");
-        context.getTelemetry().addLine("A: save");
+        context.getTelemetry().addLine("Dpad Up/Down: Change value");
+        context.getTelemetry().addLine("Dpad Left/Right: Change increment");
+        context.getTelemetry().addLine("LB/RB: Select value to tune");
+        context.getTelemetry().addLine("X: Run test path");
+        context.getTelemetry().addLine("A: Save");
         context.getTelemetry().update();
 
         return false;

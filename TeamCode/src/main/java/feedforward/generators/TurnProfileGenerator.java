@@ -29,7 +29,7 @@ public class TurnProfileGenerator {
     /** Creates a generator from one explicit follower-configuration source. */
     public TurnProfileGenerator(double omega_max, double alpha_max, FollowerConstants constants) {
         this(omega_max, alpha_max, constants.angularKV, constants.angularKA,
-                constants.headingCoeffs.kS);
+                constants.angularCoeffs.kS);
     }
 
     /**

@@ -41,11 +41,12 @@ public class CentripetalPhase extends TuningPhase {
                 .setAngleUnit(AngleUnit.DEG);
 
         Pose start = factory.pose(0, 0, 0);
-        Pose end = factory.pose(60, 0, 0);
-        forwardArc = factory.path(start, factory.arcPose(30, 30, 40), end)
-                .interpolateWith(InterpolationStyle.CONSTANT_START_HEADING).quickBuild();
-        backwardArc = factory.path(end, factory.arcPose(30, -30, 40), start)
-                .interpolateWith(InterpolationStyle.CONSTANT_START_HEADING).quickBuild();
+        Pose middle = factory.pose(64, 0, 0);
+        Pose end = factory.pose(64, 32, 90);
+        forwardArc = factory.path(start, middle, end)
+                .interpolateWith(InterpolationStyle.TANGENT_FORWARD).quickBuild();
+        backwardArc = factory.path(end, middle, start)
+                .interpolateWith(InterpolationStyle.TANGENT_BACKWARD).quickBuild();
 
         double fullStrafeAcceleration = context.constants.strafeAccelLimitIn /
                 LimitsPhase.MARGIN_MULTIPLIER;
@@ -96,6 +97,12 @@ public class CentripetalPhase extends TuningPhase {
 
     @Override
     protected boolean autoTuned() {
+        context.getTelemetry().addData("Current Pose", context.getFollower().getPose().toString());
+        context.getTelemetry().addData("Follower T", context.getFollower().getBestT());
+        context.getTelemetry().addData("Follower Cross Track Error", context.getFollower().getCrossTrackErrorIn());
+        context.getTelemetry().addData("Average Error", averageError);
+        context.getTelemetry().update();
+
         if (!updateTrial()) {
             return false;
         }
