@@ -99,11 +99,11 @@ public class Follower {
         this.velocityFeedbackGain = this.constants.velocityFeedbackGain;
         this.angularVelocityFeedbackGain = this.constants.angularVelocityFeedbackGain;
 
-        this.headingController = new PDSController(this.constants.headingCoeffs);
+        this.headingController = new PDSController(this.constants.angularCoeffs);
         this.headingController.setAngularController();
 
         this.turnController = new TurnController(
-                this.constants.headingCoeffs, angularKV, angularKA, angularVelocityFeedbackGain
+                this.constants.angularCoeffs, angularKV, angularKA, angularVelocityFeedbackGain
         );
         this.driveController = new DriveController(
                 Dist.fromIn(this.constants.forwardVelLimitIn),
@@ -363,7 +363,7 @@ public class Follower {
 
                 headingFF = omegaTarget * angularKV + alphaTarget * angularKA;
                 if (Math.abs(omegaTarget) > 1e-6) {
-                    headingFF += Math.signum(omegaTarget) * constants.headingCoeffs.kS;
+                    headingFF += Math.signum(omegaTarget) * constants.angularCoeffs.kS;
                 }
             }
 
@@ -505,7 +505,7 @@ public class Follower {
                     a_d * translationalKA + Math.signum(v_cmd) *
                     constants.translationalCoeffs.kS;
             double turnPow = w_cmd * angularKV + alpha_d * angularKA;
-            turnPow += Math.signum(turnPow) * constants.headingCoeffs.kS;
+            turnPow += Math.signum(turnPow) * constants.angularCoeffs.kS;
 
             double availableMotorPower = 1.0;
             turnPow = Range.clip(turnPow, -availableMotorPower, availableMotorPower);

@@ -71,7 +71,7 @@ public class LimitsPhase extends TuningPhase {
 
     @Override
     protected void init() {
-        headingHoldController = new PDSController(context.constants.headingCoeffs);
+        headingHoldController = new PDSController(context.constants.angularCoeffs);
         headingHoldController.setAngularController();
         timer.reset();
     }
