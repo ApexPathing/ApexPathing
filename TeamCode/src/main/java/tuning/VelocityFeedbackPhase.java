@@ -63,8 +63,8 @@ public class VelocityFeedbackPhase extends TuningPhase {
         if (context.constants.translationalCoeffs.kD > 0.0) {
             context.constants.velocityFeedbackGain = context.constants.translationalCoeffs.kD;
         }
-        if (context.constants.headingCoeffs.kD > 0.0) {
-            context.constants.angularVelocityFeedbackGain = context.constants.headingCoeffs.kD;
+        if (context.constants.angularCoeffs.kD > 0.0) {
+            context.constants.angularVelocityFeedbackGain = context.constants.angularCoeffs.kD;
         }
         applyCurrentGains();
 
