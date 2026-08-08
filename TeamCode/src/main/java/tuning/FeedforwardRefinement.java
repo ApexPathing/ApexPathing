@@ -32,7 +32,7 @@ public class FeedforwardRefinement extends TuningPhase {
     private boolean waitingForStart = false;
     private boolean isForward = true;
 
-    protected FeedforwardRefinement(TunerContext context) {
+    public FeedforwardRefinement(TunerContext context) {
         super(context);
         final double EPSILON = 0.2;
 
