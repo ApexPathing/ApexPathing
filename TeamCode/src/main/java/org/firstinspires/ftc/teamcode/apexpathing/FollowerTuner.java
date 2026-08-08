@@ -10,7 +10,7 @@ import core.FollowerConstants;
 import geometry.Pose;
 import tuning.CentripetalPhase;
 import tuning.DrivePhase;
-import tuning.FeedforwardRefinement;
+import tuning.FeedforwardTuner;
 import tuning.HeadingPhase;
 import tuning.LimitsPhase;
 import tuning.TunerContext;
@@ -37,7 +37,7 @@ public class FollowerTuner extends LinearOpMode {
                 constants.angularKA != 0.0),
         DRIVE(DrivePhase.class, (FollowerConstants constants) ->
                 constants.translationalCoeffs.kP != 0.0),
-        FEEDFORWARD(FeedforwardRefinement.class, (FollowerConstants constants) ->
+        FEEDFORWARD(FeedforwardTuner.class, (FollowerConstants constants) ->
                 constants.angularKV != 0.0 && constants.angularKA != 0.0 &&
                         constants.translationalKV != 0.0 && constants.translationalKA != 0.0),
         CENTRIPETAL(CentripetalPhase.class, (FollowerConstants constants) ->
