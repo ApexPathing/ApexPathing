@@ -139,7 +139,7 @@ public abstract class BaseDrivetrain<T extends BaseDrivetrainConstants<T>> {
             flMotor.setPower(newFlPower);
             lastFlPower = newFlPower;
         }
-        if (Math.abs(newFlPower - lastFrPower) > POWER_TOLERANCE) {
+        if (Math.abs(newFrPower - lastFrPower) > POWER_TOLERANCE) {
             frMotor.setPower(newFrPower);
             lastFrPower = newFrPower;
         }

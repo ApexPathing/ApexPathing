@@ -5,6 +5,8 @@ import java.util.function.Supplier;
 import geometry.AngleUnit;
 import geometry.DistUnit;
 import geometry.GeometryFactory;
+import geometry.Pose;
+import geometry.Vector;
 import paths.heading.InterpolationStyle;
 import paths.movements.Path;
 
@@ -47,19 +49,31 @@ public class DrivePhase extends TuningPhase {
     protected boolean autoTuneIsPossible() { return true; }
 
     @Override
+    protected void showPreRunInstructions() {
+        context.getTelemetry().addLine(
+                "Place the robot with at least 24 inches clear in front and behind it.");
+        context.getTelemetry().addLine(
+                "The automatic test oscillates around its start, then moves to a nearby target.");
+    }
+
+    @Override
     protected void init() {
+        positionRobotForSimulation(new Pose(
+                Vector.of(-55.0, 0.0, DistUnit.IN), geometry.Angle.fromRad(0.0)));
         // We only want to use the existing drive coefficients if we are in manual mode
         if (manualMode) {
+            context.getFollower().enableControllers();
             context.getFollower().setDriveCoefficients(context.constants.translationalCoeffs);
             return;
         }
 
-        routine.start();
+        routine.start(context);
     }
 
     @Override
     protected boolean autoTuned() {
         if (!routine.update(context)) {
+            routine.reportProgress(context);
             return false;
         }
 
@@ -112,8 +126,8 @@ public class DrivePhase extends TuningPhase {
         context.getTelemetry().addLine("Dpad Up/Down: Change value");
         context.getTelemetry().addLine("Dpad Left/Right: Change increment");
         context.getTelemetry().addLine("LB/RB: Select value to tune");
-        context.getTelemetry().addLine("X: Run test path");
-        context.getTelemetry().addLine("A: Save");
+        context.getTelemetry().addLine(control("X") + ": Run test path");
+        context.getTelemetry().addLine(control("A") + ": Save");
         context.getTelemetry().update();
 
         return false;
@@ -124,5 +138,10 @@ public class DrivePhase extends TuningPhase {
         context.getTelemetry().addData("Drive P", context.constants.translationalCoeffs.kP);
         context.getTelemetry().addData("Drive D", context.constants.translationalCoeffs.kD);
         context.getTelemetry().addData("Drive S", context.constants.translationalCoeffs.kS);
+        if (!manualMode) {
+            context.getTelemetry().addData("Automatic validation",
+                    routine.getValidationSummary());
+            context.getTelemetry().addData("PDS response CSV", routine.getCsvPath());
+        }
     }
 }

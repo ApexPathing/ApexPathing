@@ -1,18 +1,19 @@
 package tuning;
 
 import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.Range;
 
 import controllers.PDSController;
 import controllers.PDSController.PDSCoefficients;
+import geometry.Angle;
+import geometry.DistUnit;
 import geometry.Pose;
+import geometry.Vector;
 
 /**
- * A routine that tunes kP, kD, and kS for a specific axis (drive, strafe, or heading) by first
- * tuning the kS value and then tuning the kP and kD values based on the maximum acceleration
- * observed during a movement.
- *
- * @author Dylan B. - 18597 RoboClovers - Delta
- * @author Sohum Arora - 22985 Paraducks
+ * Tunes static friction and PD position gains. Static friction is found with a bounded search;
+ * PD gains come from a repeatable relay-feedback limit cycle and the Ziegler-Nichols PD rule.
+ * A final point-to-point response is logged and checked before the phase reports completion.
  */
 public class PDSRoutine {
     enum Axis {
@@ -24,44 +25,90 @@ public class PDSRoutine {
     enum PDSState {
         TUNING_KS,
         SETTLING_BETWEEN_KS,
-        SETTLING_FOR_PD,
-        TUNING_PD
+        SETTLING_FOR_RELAY,
+        TUNING_RELAY,
+        SETTLING_FOR_VALIDATION,
+        VALIDATING_PD
     }
 
     private static final double MOVEMENT_THRESHOLD = 0.05;
     private static final double HEADING_THRESHOLD = 0.02;
-    private static final double GUESS_TIME = 1500;
-    private static final double SETTLING_TIME = 750;
-    private static final double TUNING_TIME = 1250;
+    private static final double GUESS_TIME_MS = 1500.0;
+    private static final double SETTLING_TIME_MS = 750.0;
+    private static final double RELAY_TIMEOUT_SECONDS = 24.0;
+    private static final double VALIDATION_TIMEOUT_SECONDS = 4.0;
+    private static final double VALIDATION_SETTLED_SECONDS = 0.50;
+    private static final double MAX_VALIDATION_POWER = 0.75;
 
     private final Axis axis;
     private final ElapsedTime timer = new ElapsedTime();
+    private final ElapsedTime sessionTimer = new ElapsedTime();
     private final PDSController controller;
     private final BinarySearch search;
     private final double threshold;
 
     private PDSState state = PDSState.TUNING_KS;
-    private double startTime;
-    private double maxAcceleration;
-    private double velocityAtMaxAcceleration;
-    private double maxAccelerationTime;
+    private double startValue;
+    private RelayOscillationAnalyzer relay;
+    private RelayOscillationAnalyzer.Estimate relayEstimate;
+    private double validationTarget;
+    private double validationMaxPosition;
+    private double validationSettledSince = -1.0;
+    private double validationFinalError = Double.NaN;
+    private double validationOvershoot = Double.NaN;
+    private boolean validationPassed;
+    private String validationSummary = "Not run";
+    private TuningCsvWriter csv;
 
     PDSRoutine(TunerContext context, Axis axis) {
         search = new BinarySearch(0.0, 0.4, 0.01);
         this.axis = axis;
-        context.getFollower().disableControllers();
-        context.getFollower().setPose(Pose.zero());
         controller = new PDSController(new PDSCoefficients());
-        if (axis == Axis.HEADING) {
-            controller.setAngularController();
-        }
+        if (axis == Axis.HEADING) { controller.setAngularController(); }
         threshold = axis == Axis.HEADING ? HEADING_THRESHOLD : MOVEMENT_THRESHOLD;
     }
 
-    void start() {
+    void start(TunerContext context) {
+        context.getFollower().disableControllers();
+        resetAxisPose(context);
         timer.reset();
+        sessionTimer.reset();
+        controller.getCoefficients().setkP(0.0);
+        controller.getCoefficients().setkD(0.0);
         controller.getCoefficients().setkS(search.getGuess());
         state = PDSState.TUNING_KS;
+        relay = null;
+        relayEstimate = null;
+        validationSummary = "Pending relay identification";
+        validationPassed = false;
+        csv = TuningCsvWriter.open(
+                "pds_" + axis.toString().toLowerCase(),
+                "time_s", "axis", "state", "target", "position", "error",
+                "velocity", "command", "relay_cycles"
+        );
+    }
+
+    private void resetAxisPose(TunerContext context) {
+        Pose stagingPose;
+        switch (axis) {
+            case DRIVE:
+                stagingPose = new Pose(Vector.of(-55.0, 0.0, DistUnit.IN), Angle.fromRad(0.0));
+                break;
+            case STRAFE:
+                stagingPose = new Pose(Vector.of(0.0, -55.0, DistUnit.IN), Angle.fromRad(0.0));
+                break;
+            default:
+                stagingPose = Pose.zero();
+                break;
+        }
+        if (Boolean.getBoolean("apex.simulation.unlockTunerPhases")) {
+            context.positionRobotForSimulation(stagingPose);
+        } else {
+            // Re-zeroing odometry does not move the real robot and keeps every bounded test
+            // centered on its actual starting location.
+            context.getFollower().setPose(Pose.zero());
+        }
+        startValue = getValue(context.getFollower().getPose());
     }
 
     private void move(TunerContext context, double power) {
@@ -91,63 +138,227 @@ public class PDSRoutine {
         }
     }
 
+    private double getRelativePosition(TunerContext context) {
+        return getValue(context.getFollower().getPose()) - startValue;
+    }
+
+    private double getAxisVelocity(TunerContext context) {
+        return getValue(context.getFollower().getVelocity());
+    }
+
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     public boolean update(TunerContext context) {
         switch (state) {
             case TUNING_KS:
-                move(context, search.getGuess());
-                if (timer.milliseconds() >= GUESS_TIME) {
-                    double movement = Math.abs(getValue(context.getFollower().getPose()));
-                    boolean keepTuning = search.updateGuess(movement <= threshold);
-                    state = keepTuning ? PDSState.SETTLING_BETWEEN_KS : PDSState.SETTLING_FOR_PD;
-                    if (!keepTuning) {
-                        controller.getCoefficients().setkS(search.getGuess());
-                    }
-                    timer.reset();
-                }
-                break;
+                return updateStaticFriction(context);
             case SETTLING_BETWEEN_KS:
-                context.getFollower().stop();
-                if (timer.milliseconds() >= SETTLING_TIME) {
-                    state = PDSState.TUNING_KS;
-                    timer.reset();
-                    context.getFollower().setPose(Pose.zero());
-                }
-                break;
-            case SETTLING_FOR_PD:
-                context.getFollower().stop();
-                if (timer.milliseconds() >= SETTLING_TIME) {
-                    state = PDSState.TUNING_PD;
-                    timer.reset();
-                    startTime = System.nanoTime();
-                }
-                break;
-            case TUNING_PD:
-                move(context, 1.0);
-                double acceleration = getValue(context.getFollower().getAcceleration());
-                if (acceleration > maxAcceleration) {
-                    maxAcceleration = acceleration;
-                    maxAccelerationTime = (System.nanoTime() - startTime) / 1.0e9;
-                    velocityAtMaxAcceleration = getValue(context.getFollower().getVelocity());
-                }
-                if (timer.milliseconds() >= TUNING_TIME) {
-                    context.getFollower().stop();
-                    if (maxAcceleration <= 0.001) {
-                        throw new IllegalStateException(
-                                "Max acceleration was too low during tuning."
-                        );
-                    }
-                    double delay = Math.max(
-                            0.001, maxAccelerationTime - velocityAtMaxAcceleration / maxAcceleration
-                    );
-                    controller.getCoefficients().setkP(1.2 / (delay * maxAcceleration));
-                    controller.getCoefficients().setkD(0.6 / maxAcceleration);
-                    return true;
-                }
-                break;
+                settle(context, PDSState.TUNING_KS);
+                return false;
+            case SETTLING_FOR_RELAY:
+                if (settle(context, PDSState.TUNING_RELAY)) { beginRelayTest(context); }
+                return false;
+            case TUNING_RELAY:
+                return updateRelay(context);
+            case SETTLING_FOR_VALIDATION:
+                if (settle(context, PDSState.VALIDATING_PD)) { beginValidation(context); }
+                return false;
+            case VALIDATING_PD:
+                return updateValidation(context);
+            default:
+                return false;
         }
+    }
+
+    private boolean updateStaticFriction(TunerContext context) {
+        double command = search.getGuess();
+        move(context, command);
+        double movement = Math.abs(getRelativePosition(context));
+        logSample(context, 0.0, getRelativePosition(context), command);
+
+        // Stop a successful guess as soon as real movement is established. Waiting out the whole
+        // window would make every kS probe travel unnecessarily far across the field.
+        boolean moved = movement > threshold;
+        if (!moved && timer.milliseconds() < GUESS_TIME_MS) { return false; }
+
+        boolean keepTuning = search.updateGuess(!moved);
+        state = keepTuning ? PDSState.SETTLING_BETWEEN_KS : PDSState.SETTLING_FOR_RELAY;
+        if (!keepTuning) { controller.getCoefficients().setkS(search.getGuess()); }
+        timer.reset();
         return false;
     }
 
+    /** Returns true on the loop where the requested next state is entered. */
+    private boolean settle(TunerContext context, PDSState nextState) {
+        context.getFollower().stop();
+        logSample(context, 0.0, getRelativePosition(context), 0.0);
+        if (timer.milliseconds() < SETTLING_TIME_MS) { return false; }
+
+        resetAxisPose(context);
+        state = nextState;
+        timer.reset();
+        return true;
+    }
+
+    private void beginRelayTest(TunerContext context) {
+        double basePower = axis == Axis.HEADING ? 0.22 : 0.30;
+        double relayPower = Math.min(0.55,
+                Math.max(basePower, Math.abs(controller.getCoefficients().kS) + 0.08));
+        double hysteresis = axis == Axis.HEADING ? Math.toRadians(5.0) : 1.5;
+        relay = new RelayOscillationAnalyzer(relayPower, hysteresis);
+        validationSummary = "Collecting repeatable relay cycles";
+    }
+
+    private boolean updateRelay(TunerContext context) {
+        double elapsed = timer.seconds();
+        double position = getRelativePosition(context);
+        double safetyLimit = axis == Axis.HEADING ? Math.toRadians(80.0) : 18.0;
+        if (!Double.isFinite(position) || Math.abs(position) > safetyLimit) {
+            abort(context, "Relay test exceeded its bounded travel envelope");
+        }
+
+        relay.observe(elapsed, position);
+        double command = relay.getCommand();
+        move(context, command);
+        logSample(context, 0.0, position, command);
+
+        boolean timedOut = elapsed >= RELAY_TIMEOUT_SECONDS;
+        if (!relay.hasStableEstimate() && !timedOut) { return false; }
+        if (relay.getCycleCount() < 5) {
+            abort(context, "Relay test did not produce five complete oscillations");
+        }
+        if (!relay.hasStableEstimate()) {
+            abort(context, "Relay oscillations were not repeatable enough to tune safely");
+        }
+
+        relayEstimate = relay.estimate();
+        PDSCoefficients pd = calculateZieglerNicholsPd(
+                relayEstimate.ultimateGain, relayEstimate.periodSeconds);
+        controller.getCoefficients().setkP(pd.kP);
+        controller.getCoefficients().setkD(pd.kD);
+        context.getFollower().stop();
+        state = PDSState.SETTLING_FOR_VALIDATION;
+        timer.reset();
+        validationSummary = "Relay fit complete; validating point-to-point response";
+        return false;
+    }
+
+    private void beginValidation(TunerContext context) {
+        validationTarget = axis == Axis.HEADING ? Math.toRadians(30.0) : 8.0;
+        validationMaxPosition = 0.0;
+        validationSettledSince = -1.0;
+        validationFinalError = validationTarget;
+        validationOvershoot = 0.0;
+        controller.reset();
+    }
+
+    private boolean updateValidation(TunerContext context) {
+        double elapsed = timer.seconds();
+        double position = getRelativePosition(context);
+        double velocity = getAxisVelocity(context);
+        double error = validationTarget - position;
+        double command = Range.clip(controller.calculate(error),
+                -MAX_VALIDATION_POWER, MAX_VALIDATION_POWER);
+
+        double safetyLimit = axis == Axis.HEADING ? Math.toRadians(80.0) : 18.0;
+        if (!Double.isFinite(position) || !Double.isFinite(velocity) ||
+                Math.abs(position) > safetyLimit) {
+            abort(context, "PD validation exceeded its bounded travel envelope");
+        }
+
+        move(context, command);
+        validationMaxPosition = Math.max(validationMaxPosition, position);
+        validationFinalError = error;
+        validationOvershoot = Math.max(0.0,
+                (validationMaxPosition - validationTarget) / validationTarget);
+        logSample(context, validationTarget, position, command);
+
+        double errorTolerance = axis == Axis.HEADING ? Math.toRadians(2.5) : 0.75;
+        double velocityTolerance = axis == Axis.HEADING ? 0.10 : 1.0;
+        boolean withinTolerance = Math.abs(error) <= errorTolerance &&
+                Math.abs(velocity) <= velocityTolerance;
+        if (withinTolerance) {
+            if (validationSettledSince < 0.0) { validationSettledSince = elapsed; }
+        } else {
+            validationSettledSince = -1.0;
+        }
+
+        boolean settled = validationSettledSince >= 0.0 &&
+                elapsed - validationSettledSince >= VALIDATION_SETTLED_SECONDS;
+        if (!settled && elapsed < VALIDATION_TIMEOUT_SECONDS) { return false; }
+
+        context.getFollower().stop();
+        validationPassed = settled && validationOvershoot <= 0.35;
+        validationSummary = validationPassed
+                ? "PASSED: settled response, overshoot " +
+                        Math.round(validationOvershoot * 1000.0) / 10.0 + "%"
+                : "FAILED: response did not meet settling/overshoot limits";
+        if (csv != null) { csv.close(); }
+        if (!validationPassed) {
+            throw new IllegalStateException(
+                    "Identified PD gains failed the bounded point-to-point validation and were " +
+                            "not saved. Inspect CSV: " + getCsvPath()
+            );
+        }
+        return true;
+    }
+
+    private void abort(TunerContext context, String reason) {
+        context.getFollower().stop();
+        validationSummary = "FAILED: " + reason;
+        if (csv != null) { csv.close(); }
+        throw new IllegalStateException(reason + ". See PDS CSV: " + getCsvPath());
+    }
+
+    private void logSample(TunerContext context, double target, double position, double command) {
+        if (csv == null) { return; }
+        double velocity = getAxisVelocity(context);
+        csv.writeRow(
+                sessionTimer.seconds(), axis, state, target, position,
+                target - position, velocity, command,
+                relay == null ? 0 : relay.getCycleCount()
+        );
+    }
+
+    /** Classic closed-loop Ziegler-Nichols PD settings from ultimate gain and period. */
+    static PDSCoefficients calculateZieglerNicholsPd(double ultimateGain,
+                                                     double ultimatePeriodSeconds) {
+        if (!Double.isFinite(ultimateGain) || ultimateGain <= 0.0 ||
+                !Double.isFinite(ultimatePeriodSeconds) || ultimatePeriodSeconds <= 0.0) {
+            throw new IllegalArgumentException(
+                    "Ultimate gain and period must be finite and positive");
+        }
+        double kP = 0.8 * ultimateGain;
+        double kD = kP * ultimatePeriodSeconds / 8.0;
+        return new PDSCoefficients(kP, kD, 0.0);
+    }
+
+    void reportProgress(TunerContext context) {
+        context.getTelemetry().addLine("Automatic " + axis.toString().toLowerCase() +
+                " tuning in progress");
+        context.getTelemetry().addData("Step", state.toString().replace('_', ' '));
+        context.getTelemetry().addData("Static guess", search.getGuess());
+        if (relay != null) {
+            context.getTelemetry().addData("Stable relay cycles", relay.getCycleCount());
+        }
+        if (relayEstimate != null) {
+            context.getTelemetry().addData("Ultimate gain", relayEstimate.ultimateGain);
+            context.getTelemetry().addData("Ultimate period", relayEstimate.periodSeconds);
+        }
+        if (state == PDSState.VALIDATING_PD) {
+            context.getTelemetry().addData("Validation target", validationTarget);
+            context.getTelemetry().addData("Validation error", validationFinalError);
+            context.getTelemetry().addData("Validation overshoot", validationOvershoot);
+        }
+        context.getTelemetry().addData("CSV", getCsvPath());
+        context.getTelemetry().addLine("Keep the OpMode running until results appear.");
+        context.getTelemetry().update();
+    }
+
     PDSCoefficients getCoefficients() { return controller.getCoefficients(); }
+
+    String getValidationSummary() { return validationSummary; }
+
+    boolean validationPassed() { return validationPassed; }
+
+    String getCsvPath() { return csv == null ? "Unavailable" : csv.getPath(); }
 }

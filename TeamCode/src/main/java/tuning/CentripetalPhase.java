@@ -40,9 +40,15 @@ public class CentripetalPhase extends TuningPhase {
         GeometryFactory factory = new GeometryFactory(context.getFollower()).setDistUnit(DistUnit.IN)
                 .setAngleUnit(AngleUnit.DEG);
 
-        Pose start = factory.pose(0, 0, 0);
-        Pose middle = factory.pose(64, 0, 0);
-        Pose end = factory.pose(64, 32, 90);
+        // Center the complete 64x32 test footprint on the field, not merely its starting point.
+        Pose start = factory.pose(-32, -16, 0);
+        Pose middle = factory.pose(32, -16, 0);
+        Pose end = factory.pose(32, 16, 90);
+        if (Boolean.getBoolean("apex.simulation.unlockTunerPhases")) {
+            positionRobotForSimulation(start);
+        } else {
+            context.getFollower().setPose(start);
+        }
         forwardArc = factory.path(start, middle, end)
                 .interpolateWith(InterpolationStyle.TANGENT_FORWARD).quickBuild();
         backwardArc = factory.path(end, middle, start)
@@ -76,7 +82,11 @@ public class CentripetalPhase extends TuningPhase {
             return;
         }
 
-        errorSum += context.getFollower().getCrossTrackErrorIn();
+        double error = context.getFollower().getCentripetalErrorIn();
+        if (!Double.isFinite(error)) {
+            return;
+        }
+        errorSum += error;
         samples++;
     }
 
@@ -91,6 +101,12 @@ public class CentripetalPhase extends TuningPhase {
             return false;
         }
 
+        if (samples == 0) {
+            throw new IllegalStateException(
+                    "Centripetal trial completed without usable middle-arc samples. " +
+                            "Verify localization and path tracking before tuning kCentripetal."
+            );
+        }
         averageError = errorSum / samples;
         return true;
     }
@@ -100,6 +116,18 @@ public class CentripetalPhase extends TuningPhase {
         context.getTelemetry().addData("Current Pose", context.getFollower().getPose().toString());
         context.getTelemetry().addData("Follower T", context.getFollower().getBestT());
         context.getTelemetry().addData("Follower Cross Track Error", context.getFollower().getCrossTrackErrorIn());
+        context.getTelemetry().addData("Inward Centripetal Error",
+                context.getFollower().getCentripetalErrorIn());
+        context.getTelemetry().addData("Closest Path Point",
+                context.getFollower().getClosestPathPoint().toString());
+        context.getTelemetry().addData("Cross-Track Normal",
+                context.getFollower().getCrossTrackNormal().toString());
+        context.getTelemetry().addData("Inward Curve Normal",
+                context.getFollower().getPathNormal().toString());
+        context.getTelemetry().addData("Cross-Track Vector",
+                context.getFollower().getCrossTrackCorrection().toString());
+        context.getTelemetry().addData("Centripetal Vector",
+                context.getFollower().getCentripetalCorrection().toString());
         context.getTelemetry().addData("Average Error", averageError);
         context.getTelemetry().update();
 
@@ -135,7 +163,7 @@ public class CentripetalPhase extends TuningPhase {
         context.getTelemetry().addData("Increment", increment);
         context.getTelemetry().addLine("Dpad Up/Down: change centripetal gain");
         context.getTelemetry().addLine("Dpad Left/Right: change increment");
-        context.getTelemetry().addLine("A: save");
+        context.getTelemetry().addLine(control("A") + ": save");
         context.getTelemetry().update();
 
         return opMode.gamepad1.aWasPressed();

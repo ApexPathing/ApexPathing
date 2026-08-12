@@ -25,7 +25,7 @@ import localizers.util.LowPassFilter;
  */
 public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
     protected T config;
-    private final boolean USE_KALMAN = true; // set this to false if kalman filter has issues to revert to low pass filter
+    private final boolean USE_KALMAN = false; // set this to false if kalman filter has issues to revert to low pass filter
 
     // A single set of filters. When fed velocity, they output [Velocity, Acceleration].
     private DataFilter xFilter = USE_KALMAN ? new AdaptiveKalmanFilter() : new LowPassFilter();

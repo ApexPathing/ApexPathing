@@ -247,4 +247,19 @@ public class PathSegment {
 
         return normal.normalize();
     }
+
+    /**
+     * Returns the unit normal on the left side of the path tangent. Unlike the principal arc
+     * normal, this direction remains defined on straight sections and does not flip at an
+     * inflection point, making it suitable for signed cross-track feedback.
+     */
+    public static Vector calculateLeftNormal(Vector firstDerivative) {
+        Vector tangent = firstDerivative.normalize();
+        if (tangent.getMag().getIn() < 1e-9) { return Vector.zero(); }
+        return Vector.of(
+                -tangent.getY().getIn(),
+                tangent.getX().getIn(),
+                DistUnit.IN
+        );
+    }
 }

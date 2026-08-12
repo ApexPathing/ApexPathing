@@ -71,14 +71,20 @@ public class VelocityFeedbackPhase extends TuningPhase {
         GeometryFactory factory = new GeometryFactory(context.getFollower())
                 .setDistUnit(DistUnit.IN).setAngleUnit(AngleUnit.DEG);
 
-        Pose start = factory.pose(0, 0, 0);
-        Pose end = factory.pose(48, 0, 0);
+        // Center the complete 48-inch translation footprint on the field.
+        Pose start = factory.pose(-24, 0, 0);
+        Pose end = factory.pose(24, 0, 0);
+        if (Boolean.getBoolean("apex.simulation.unlockTunerPhases")) {
+            positionRobotForSimulation(start);
+        } else {
+            context.getFollower().setPose(start);
+        }
         forwardPath = factory.path(start, end)
                 .interpolateWith(InterpolationStyle.TANGENT_FORWARD).profiledBuild();
         backwardPath = factory.path(end, start)
                 .interpolateWith(InterpolationStyle.TANGENT_FORWARD).profiledBuild();
 
-        Pose turned = factory.pose(0, 0, 90);
+        Pose turned = factory.pose(-24, 0, 90);
         forwardTurn = factory.turn(start).turnTo(turned.getHeading()).profiledBuild();
         backwardTurn = factory.turn(turned).turnTo(start.getHeading()).profiledBuild();
 
@@ -283,8 +289,8 @@ public class VelocityFeedbackPhase extends TuningPhase {
         context.getTelemetry().addLine("Up/Down: change value");
         context.getTelemetry().addLine("Left/Right: change increment");
         context.getTelemetry().addLine("LB/RB: select value");
-        context.getTelemetry().addLine("X: restart test");
-        context.getTelemetry().addLine("A: save");
+        context.getTelemetry().addLine(control("X") + ": restart test");
+        context.getTelemetry().addLine(control("A") + ": save");
         context.getTelemetry().update();
 
         if (opMode.gamepad1.aWasPressed()) {

@@ -46,8 +46,6 @@ public class Follower {
     private final double headingTol; // Radians
     private final double distanceTol; // Inches
 
-    private double lastS = -1.0;
-    private long lastNano = -1;
     private Angle lastHeading; // Tracks heading between ticks for angular callback sweeps
     private Pose lastPose;
 
@@ -74,7 +72,13 @@ public class Follower {
     private double turnDirection;
     private double turnTotalDisplacement;
     private double crossTrackError;
+    private double centripetalError;
     private double t;
+    private Vector closestPathPoint = Vector.zero();
+    private Vector crossTrackNormal = Vector.zero();
+    private Vector pathNormal = Vector.zero();
+    private Vector crossTrackCorrection = Vector.zero();
+    private Vector centripetalCorrection = Vector.zero();
 
     /** Constructs the drivetrain, localizer, and follower from the given {@link ApexConstants}. */
     public Follower(ApexConstants constants, HardwareMap hardwareMap) {
@@ -254,12 +258,6 @@ public class Follower {
         Vector currentPos = current.getVec();
         Angle currentHeading = current.getHeading();
 
-        long currentNano = System.nanoTime();
-
-        // Calculate delta time for velocity feedback
-        double deltaT_seconds = (lastNano != -1) ? (currentNano - lastNano) / 1e9 : 0.0;
-        lastNano = currentNano;
-
         // region Turn Execution
         if (currentMovement instanceof Turn) {
             Turn turn = (Turn) currentMovement;
@@ -297,8 +295,9 @@ public class Follower {
             Vector error = targetTurnPoseVec.minus(currentPos);
             double errorMag = error.getMag().getIn();
 
-            // Hold xy position actively while turning
-            if (drivetrain.isHolonomic() && errorMag > distanceTol) {
+            // Hold xy only when translational control is explicitly enabled. Tuning phases can
+            // disable it to guarantee that a Turn produces no x/y drivetrain command.
+            if (driveControllerEnabled && drivetrain.isHolonomic() && errorMag > distanceTol) {
                 Vector fieldFeedback = driveController.calculatePointToPoint(
                         targetTurnPoseVec, currentPos);
                 AllocatedCommand positionHold = allocateHolonomicStage(
@@ -322,11 +321,15 @@ public class Follower {
             t = segment.getBestT(currentPos);
 
             Vector targetPoseVec = segment.getPosition(t);
+            closestPathPoint = targetPoseVec;
             double s = segment.getDistanceToEndIn(targetPoseVec, t);
             Vector velVec = segment.getFirstDerivative(t);
             Vector accelVec = segment.getSecondDerivative(t);
-            Vector normal = PathSegment.calculateArcNormal(velVec, accelVec);
             Vector unitTangent = velVec.normalize();
+            Vector lateralNormal = PathSegment.calculateLeftNormal(velVec);
+            Vector normal = PathSegment.calculateArcNormal(velVec, accelVec);
+            crossTrackNormal = lateralNormal;
+            pathNormal = normal;
             Vector endTangent = segment.getFirstDerivative(1.0).normalize();
 
             // Process scheduled distance and angular callbacks
@@ -345,9 +348,10 @@ public class Follower {
 
             HolonomicDriveModel driveModel = getActiveHolonomicDriveModel();
 
-            double robotTangentialVel = (deltaT_seconds > 1e-6 && lastS >= 0.0) ?
-                    (lastS - s) / deltaT_seconds : 0.0;
-            lastS = s;
+            // Localizers report field-axis velocity. Project it directly onto the path tangent;
+            // differentiating closest-point progress makes velocity jump when the projection
+            // jitters or changes spline branch, and v^2 magnifies that noise in centripetal power.
+            double robotTangentialVel = robotVel.dot(unitTangent).getIn();
 
             // Calculate heading power allocation
             Angle headingTarg = path.getInterpolator().getHeadingTarg(s, velVec, endTangent);
@@ -374,16 +378,16 @@ public class Follower {
 
             // Calculate lateral cross track power allocation
             Vector positionalError = targetPoseVec.minus(currentPos);
-            crossTrackError = positionalError.dot(normal).getIn();
+            crossTrackError = positionalError.dot(lateralNormal).getIn();
+            centripetalError = positionalError.dot(normal).getIn();
             double lateralFeedbackMag = driveControllerEnabled
                     ? driveController.calculateCrossTrack(crossTrackError) : 0.0;
+            crossTrackCorrection = lateralNormal.times(lateralFeedbackMag);
 
-            double requiredLateralAccel = robotTangentialVel * robotTangentialVel * kappa;
-            double centripetalMag = requiredLateralAccel * centripetalGain;
+            centripetalCorrection = calculateCentripetalCorrection(
+                    normal, robotTangentialVel, kappa, centripetalGain);
 
-            Vector requestedLateralField = normal.times(
-                    centripetalMag + lateralFeedbackMag
-            );
+            Vector requestedLateralField = crossTrackCorrection.plus(centripetalCorrection);
             double availableMotorPower = 1.0 - Math.abs(turnPow);
             AllocatedCommand lateralCommand = allocateHolonomicStage(
                     requestedLateralField,
@@ -566,8 +570,6 @@ public class Follower {
         headingController.reset();
         turnController.reset();
         driveController.reset();
-        lastS = -1.0;
-        lastNano = -1;
         paused = false;
 
         // Reset tracker for angular callbacks so it doesn't instantly trigger on path start
@@ -600,7 +602,6 @@ public class Follower {
     public void resume() {
         if (this.paused) {
             this.paused = false;
-            this.lastNano = -1;
         }
     }
 
@@ -673,11 +674,35 @@ public class Follower {
 
     public double getCrossTrackErrorIn() { return crossTrackError; }
 
+    /** Signed path error toward the local center of curvature; positive means outside the turn. */
+    public double getCentripetalErrorIn() { return centripetalError; }
+
+    /** The most recent closest point used by the holonomic follower. Intended for diagnostics. */
+    public Vector getClosestPathPoint() { return closestPathPoint; }
+
+    /** Continuous left-hand path normal used to define signed cross-track feedback. */
+    public Vector getCrossTrackNormal() { return crossTrackNormal; }
+
+    /** The principal path normal, which always points toward the local center of curvature. */
+    public Vector getPathNormal() { return pathNormal; }
+
+    /** Field-space feedback vector that corrects cross-track error. */
+    public Vector getCrossTrackCorrection() { return crossTrackCorrection; }
+
+    /** Field-space feedforward vector that supplies centripetal acceleration. */
+    public Vector getCentripetalCorrection() { return centripetalCorrection; }
+
     public void disableHeadingController() { this.headingControllerEnabled = false; }
 
     public void disableDriveController() { this.driveControllerEnabled = false; }
 
     public void disableControllers() { disableHeadingController(); disableDriveController(); }
+
+    public void enableHeadingController() { this.headingControllerEnabled = true; }
+
+    public void enableDriveController() { this.driveControllerEnabled = true; }
+
+    public void enableControllers() { enableHeadingController(); enableDriveController(); }
 
     public void setHeadingCoefficients(PDSCoefficients coefficients) {
         headingController.setCoefficients(coefficients);
@@ -689,6 +714,20 @@ public class Follower {
     }
 
     public void setCentripetal(double centripetalGain) { this.centripetalGain = centripetalGain; }
+
+    /**
+     * Builds centripetal power from a principal normal. Because the normal already contains the
+     * bend direction, curvature contributes magnitude only; applying its sign again reverses the
+     * force on clockwise/right-hand curves.
+     */
+    static Vector calculateCentripetalCorrection(Vector principalNormal,
+                                                  double tangentialVelocity,
+                                                  double signedCurvature,
+                                                  double gain) {
+        double magnitude = tangentialVelocity * tangentialVelocity *
+                Math.abs(signedCurvature) * gain;
+        return principalNormal.times(magnitude);
+    }
 
     public void setVelocityFeedback(double velocityFeedbackGain,
                                     double angularVelocityFeedbackGain) {

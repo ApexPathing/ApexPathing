@@ -42,14 +42,14 @@ final class SimApexPinpoint extends Pinpoint.Driver implements SimHardwareDevice
         MotionVector simPose = drivetrain.position;
         MotionVector simVelocity = drivetrain.velocity;
 
-        // FTCodeSim uses a corner-origin field and clockwise-positive Y/heading conventions.
-        // Apex Pathing uses a centered origin with left/CCW positive.
+        // Convert FTCodeSim's corner origin to Apex's centered origin. ApexSimulation mirrors the
+        // simulator wheel slots so its Y and heading axes already match Apex's conventions.
         pose = apexPose(
                 simPose.x - fieldCenterInches,
-                fieldCenterInches - simPose.y,
-                -simPose.theta
+                simPose.y - fieldCenterInches,
+                simPose.theta
         );
-        velocity = apexPose(simVelocity.x, -simVelocity.y, -simVelocity.theta);
+        velocity = apexPose(simVelocity.x, simVelocity.y, simVelocity.theta);
     }
 
     @Override
@@ -71,8 +71,8 @@ final class SimApexPinpoint extends Pinpoint.Driver implements SimHardwareDevice
     public void setPosition(Pose newPose) {
         drivetrain.setPosition(new MotionVector(
                 newPose.getX().getIn() + fieldCenterInches,
-                fieldCenterInches - newPose.getY().getIn(),
-                -newPose.getHeading().getRad()
+                newPose.getY().getIn() + fieldCenterInches,
+                newPose.getHeading().getRad()
         ));
         update(0.0);
     }

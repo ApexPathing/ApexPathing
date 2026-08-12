@@ -2,6 +2,8 @@ package tuning;
 
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
+import geometry.Pose;
+
 /**
  * Base class for tuning phases for the follower tuner. Each phase is responsible for tuning a
  * specific aspect of the follower's behavior The class provides a framework for running the tuning
@@ -66,6 +68,13 @@ public abstract class TuningPhase {
                     }
                     break;
             }
+
+            // A LinearOpMode can otherwise spin much faster than the hardware/localizer can
+            // provide new samples. Besides wasting CPU, differentiating the same pose repeatedly
+            // and then one discrete update creates enormous acceleration spikes (especially in
+            // FTCodeSim, whose physics advances every 20 ms). Use a deterministic 50 Hz sampling
+            // cadence for every tuner phase.
+            opMode.sleep(20);
         }
 
         context.getFollower().stop();
@@ -75,21 +84,47 @@ public abstract class TuningPhase {
     private void showModeSelector() {
         context.getTelemetry().addLine(getPhaseName() + " phase initialized");
         if (manualTuneIsPossible() && autoTuneIsPossible()) {
-            context.getTelemetry().addLine("Press B to toggle automatic and manual tuning.");
+            context.getTelemetry().addLine("Press " + control("B") +
+                    " to toggle automatic and manual tuning.");
             context.getTelemetry().addData("Selected Mode:", manualMode ? "Manual" : "Automatic");
         } else {
             manualMode = manualTuneIsPossible();
             context.getTelemetry().addData("Tuner Type:", manualMode ? "Manual" : "Automatic");
         }
-        context.getTelemetry().addLine("Press A to run this phase.");
+        showPreRunInstructions();
+        context.getTelemetry().addLine("Press " + control("A") + " to run this phase.");
         context.getTelemetry().update();
     }
+
+    /** Adds phase-specific positioning or safety guidance before the operator starts motion. */
+    protected void showPreRunInstructions() { }
 
     private void showResults() {
         context.getTelemetry().addLine(getPhaseName() + " phase complete with results:");
         reportResults();
-        context.getTelemetry().addLine("Press B to continue.");
+        context.getTelemetry().addLine("Press " + control("B") + " to continue.");
         context.getTelemetry().update();
+    }
+
+    /** Shows the stock FTCodeSim key without changing the real gamepad control. */
+    protected String control(String button) {
+        if (!Boolean.getBoolean("apex.simulation.unlockTunerPhases")) { return button; }
+
+        switch (button) {
+            case "A": return "A [; key]";
+            case "B": return "B [left-bracket key]";
+            case "X": return "X [P key]";
+            case "Y": return "Y [- key]";
+            default: return button;
+        }
+    }
+
+    /**
+     * Places a simulated movement test at its phase-specific staging pose. On hardware, resetting
+     * odometry cannot move the physical robot, so positioning remains the operator's responsibility.
+     */
+    protected void positionRobotForSimulation(Pose pose) {
+        context.positionRobotForSimulation(pose);
     }
 
     protected double manualChange() {

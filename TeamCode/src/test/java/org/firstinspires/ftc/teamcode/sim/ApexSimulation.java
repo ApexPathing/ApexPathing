@@ -12,6 +12,7 @@ import org.codeblooded.ftcodesim.input.DefaultKeybinds;
 import org.codeblooded.ftcodesim.simulator.FTCodeSim;
 import org.codeblooded.ftcodesim.simulator.FTCodeSimTelemetryInstaller;
 import org.codeblooded.ftcodesim.simulator.SimConfig;
+import org.firstinspires.ftc.teamcode.apexpathing.FollowerTuner;
 
 import java.io.File;
 import java.io.IOException;
@@ -51,10 +52,15 @@ public final class ApexSimulation {
         configureDesktopStorage();
 
         SimMecanumConfig config = new SimMecanumConfig();
-        config.frontLeftMotorName = FRONT_LEFT_MOTOR;
-        config.frontRightMotorName = FRONT_RIGHT_MOTOR;
-        config.backLeftMotorName = BACK_LEFT_MOTOR;
-        config.backRightMotorName = BACK_RIGHT_MOTOR;
+        // The FTC SDK applies the configured right-side motor reversals before physical wheel
+        // motion. FTCodeSim's SimMotor ignores setDirection(), and its mecanum model consumes the
+        // four logical powers directly with the opposite lateral/turn convention. Mirroring the
+        // model's wheel slots preserves the production motor mix while making +Y and +heading
+        // agree with Apex in the simulator.
+        config.frontLeftMotorName = FRONT_RIGHT_MOTOR;
+        config.frontRightMotorName = FRONT_LEFT_MOTOR;
+        config.backLeftMotorName = BACK_RIGHT_MOTOR;
+        config.backRightMotorName = BACK_LEFT_MOTOR;
 
         // These are the measured Code Blooded drivetrain values from FTCodeSim's DECODE example.
         config.wheelbase = 9.37008;
@@ -86,6 +92,7 @@ public final class ApexSimulation {
     }
 
     private static void configureDesktopStorage() {
+        System.setProperty(FollowerTuner.UNLOCK_PHASES_PROPERTY, "true");
         if (System.getProperty(ApexStorage.DIRECTORY_PROPERTY) == null) {
             File directory = new File(System.getProperty("user.dir"), "build/ftcodesim-data");
             System.setProperty(ApexStorage.DIRECTORY_PROPERTY, directory.getAbsolutePath());
