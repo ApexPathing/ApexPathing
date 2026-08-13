@@ -38,6 +38,7 @@ public class PDSRoutine {
     private static final double VALIDATION_TIMEOUT_SECONDS = 4.0;
     private static final double VALIDATION_SETTLED_SECONDS = 0.50;
     private static final double MAX_VALIDATION_POWER = 0.75;
+    private static final double VALIDATION_BREAKAWAY_RESERVE = 0.02;
 
     private final Axis axis;
     private final ElapsedTime timer = new ElapsedTime();
@@ -281,8 +282,12 @@ public class PDSRoutine {
         double position = getRelativePosition(context);
         double velocity = getAxisVelocity(context);
         double error = validationTarget - position;
-        double command = Range.clip(controller.calculate(error),
-                -MAX_VALIDATION_POWER, MAX_VALIDATION_POWER);
+        double errorTolerance = axis == Axis.HEADING ? Math.toRadians(2.5) : 0.75;
+        double velocityTolerance = axis == Axis.HEADING ? 0.10 : 1.0;
+        double command = ensureValidationBreakawayPower(
+                controller.calculate(error), error, velocity,
+                controller.getCoefficients().kS, errorTolerance, velocityTolerance);
+        command = Range.clip(command, -MAX_VALIDATION_POWER, MAX_VALIDATION_POWER);
 
         double safetyLimit = axis == Axis.HEADING ? Math.toRadians(80.0) : 18.0;
         if (!Double.isFinite(position) || !Double.isFinite(velocity) ||
@@ -297,8 +302,6 @@ public class PDSRoutine {
                 (validationMaxPosition - validationTarget) / validationTarget);
         logSample(context, validationTarget, position, command);
 
-        double errorTolerance = axis == Axis.HEADING ? Math.toRadians(2.5) : 0.75;
-        double velocityTolerance = axis == Axis.HEADING ? 0.10 : 1.0;
         boolean withinTolerance = Math.abs(error) <= errorTolerance &&
                 Math.abs(velocity) <= velocityTolerance;
         if (withinTolerance) {
@@ -325,6 +328,33 @@ public class PDSRoutine {
             );
         }
         return true;
+    }
+
+    /**
+     * The PDS controller deliberately softens its static-friction term near zero error. If the
+     * robot has stopped just outside the validation tolerance, that softened output can fall below
+     * the measured breakaway command and leave an otherwise valid controller permanently stuck.
+     * Apply the same narrow endpoint recovery used by the follower: only a stalled robot outside
+     * tolerance receives enough power to move, and no floor is applied after it reaches tolerance.
+     */
+    static double ensureValidationBreakawayPower(double requestedPower, double error,
+                                                  double velocity, double staticGain,
+                                                  double errorTolerance,
+                                                  double velocityTolerance) {
+        if (!Double.isFinite(requestedPower) || !Double.isFinite(error) ||
+                !Double.isFinite(velocity) || !Double.isFinite(staticGain) ||
+                !Double.isFinite(errorTolerance) || errorTolerance < 0.0 ||
+                !Double.isFinite(velocityTolerance) || velocityTolerance < 0.0) {
+            return requestedPower;
+        }
+        boolean outsideTolerance = Math.abs(error) > errorTolerance;
+        boolean stalled = Math.abs(velocity) < velocityTolerance;
+        if (!outsideTolerance || !stalled) { return requestedPower; }
+
+        double minimumPower = Math.min(MAX_VALIDATION_POWER,
+                Math.abs(staticGain) + VALIDATION_BREAKAWAY_RESERVE);
+        if (Math.abs(requestedPower) >= minimumPower) { return requestedPower; }
+        return Math.copySign(minimumPower, error);
     }
 
     private void abort(TunerContext context, String reason) {

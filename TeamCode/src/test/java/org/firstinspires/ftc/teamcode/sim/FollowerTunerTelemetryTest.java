@@ -218,6 +218,57 @@ public class FollowerTunerTelemetryTest {
         }
     }
 
+    @Test(timeout = 60_000L)
+    public void automaticHeadingIdentificationPassesPointToPointValidation() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        List<String> frames = new CopyOnWriteArrayList<>();
+        ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
+        telemetry.setMsTransmissionInterval(0);
+
+        FollowerTuner tuner = new FollowerTuner();
+        tuner.hardwareMap = hardware.hardwareMap;
+        tuner.telemetry = telemetry;
+        tuner.gamepad1 = new Gamepad();
+        tuner.gamepad2 = new Gamepad();
+
+        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(tuner, () -> { });
+        try {
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+            for (int i = 0; i < 6 && !latestFrameContains(frames, "HEADING <"); i++) {
+                tuner.gamepad1.dpad_up = true;
+                pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+                tuner.gamepad1.dpad_up = false;
+                pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            }
+            assertTrue("Heading was not available in the phase selector",
+                    latestFrameContains(frames, "HEADING <"));
+
+            tuner.gamepad1.b = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.b = false;
+            SimLinearOpModeBridge.start(session);
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+
+            tuner.gamepad1.a = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.a = false;
+
+            long resultDeadline = System.nanoTime() + 45_000_000_000L;
+            while (!latestFrameContains(frames,
+                    "Heading Controller phase complete with results") &&
+                    System.nanoTime() < resultDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
+
+            assertTrue("Automatic heading validation did not finish successfully. Latest " +
+                            "telemetry:\n" + latestFrame(frames),
+                    latestFrameContains(frames,
+                            "Heading Controller phase complete with results"));
+        } finally {
+            SimLinearOpModeBridge.stop(session);
+        }
+    }
+
     @Test
     public void velocityFeedbackPhaseCanBeSelectedAndDisplayed() throws Exception {
         markAllPhasesCompleteForSelectionTest();
