@@ -207,6 +207,48 @@ public class FollowerTunerTelemetryTest {
         }
     }
 
+    @Test
+    public void velocityFeedbackPhaseCanBeSelectedAndDisplayed() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        List<String> frames = new CopyOnWriteArrayList<>();
+        ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
+        telemetry.setMsTransmissionInterval(0);
+
+        FollowerTuner tuner = new FollowerTuner();
+        tuner.hardwareMap = hardware.hardwareMap;
+        tuner.telemetry = telemetry;
+        tuner.gamepad1 = new Gamepad();
+        tuner.gamepad2 = new Gamepad();
+
+        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(tuner, () -> { });
+        try {
+            pump(session, tuner, telemetry, 100);
+
+            for (int i = 0; i < 6 && frames.stream().noneMatch(frame ->
+                    frame.contains("VELOCITY FEEDBACK <")); i++) {
+                tuner.gamepad1.dpad_down = true;
+                pump(session, tuner, telemetry, 30);
+                tuner.gamepad1.dpad_down = false;
+                pump(session, tuner, telemetry, 30);
+            }
+            assertTrue("Velocity Feedback was not available in the phase selector",
+                    frames.stream().anyMatch(frame -> frame.contains("VELOCITY FEEDBACK <")));
+
+            tuner.gamepad1.b = true;
+            pump(session, tuner, telemetry, 30);
+            tuner.gamepad1.b = false;
+            pump(session, tuner, telemetry, 30);
+            SimLinearOpModeBridge.start(session);
+            pump(session, tuner, telemetry, 150);
+
+            assertTrue("Velocity Feedback did not initialize after selection",
+                    frames.stream().anyMatch(frame ->
+                            frame.contains("Velocity Feedback phase initialized")));
+        } finally {
+            SimLinearOpModeBridge.stop(session);
+        }
+    }
+
     private static void pump(
             SimLinearOpModeBridge.Session session,
             FollowerTuner tuner,

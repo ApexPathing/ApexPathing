@@ -46,7 +46,8 @@ public class FollowerTuner extends LinearOpMode {
         CENTRIPETAL(CentripetalPhase.class, (FollowerConstants constants) ->
                 constants.kCentripetal != 0.0),
         VELOCITY_FEEDBACK(VelocityFeedbackPhase.class, (FollowerConstants constants) ->
-                constants.angularVelocityFeedbackGain != 0.0);
+                velocityFeedbackTuned(constants.velocityFeedbackGain,
+                        constants.angularVelocityFeedbackGain));
 
         final Class<? extends TuningPhase> phaseClass;
         final Predicate<FollowerConstants> isTunedPredicate;
@@ -190,6 +191,13 @@ public class FollowerTuner extends LinearOpMode {
             phase = selectedPhaseOrdinal.phaseClass.getDeclaredConstructor(TunerContext.class)
                     .newInstance(context);
             isPhaseSelected = true;
+            // Do not let a rate-limited RESULTS frame from the previous phase obscure the next
+            // phase's selector in FTCodeSim's Driver Station.
+            telemetry.clearAll();
+            telemetry.addLine("Next phase: " + phaseDisplayName(selectedPhaseOrdinal));
+            telemetry.addLine("Choose automatic/manual mode, then press " +
+                    (Boolean.getBoolean(UNLOCK_PHASES_PROPERTY) ? "A [; key]" : "A") + ".");
+            telemetry.update();
         } catch (Exception e) {
             // This won't happen because the setup is correct, but Java requires the catch.
             throw new RuntimeException(e);
@@ -199,6 +207,19 @@ public class FollowerTuner extends LinearOpMode {
     static Phase nextPhase(Phase current) {
         int nextOrdinal = current.ordinal() + 1;
         return nextOrdinal < phaseAmount ? phases[nextOrdinal] : null;
+    }
+
+    static Class<? extends TuningPhase> nextPhaseClass(Phase current) {
+        Phase next = nextPhase(current);
+        return next == null ? null : next.phaseClass;
+    }
+
+    static boolean velocityFeedbackTuned(double translationGain, double angularGain) {
+        return translationGain != 0.0 && angularGain != 0.0;
+    }
+
+    private static String phaseDisplayName(Phase phase) {
+        return phase.name().replace('_', ' ');
     }
 
     private void finishTuningWorkflow() {

@@ -190,7 +190,7 @@ public class ApexSimulationTest {
         follower.follow(auto.testPath);
         follower.update();
         assertEquals("Callback not triggered yet", auto.callbackMessage);
-        runMovement(hardware, follower, 12.0);
+        double outboundCrossTrack = runMovement(hardware, follower, 12.0);
         feedforward.MotionParameters first = auto.testPath.getFeedforwardLut().getFFParams(0.0);
         assertTrue("Example auto path did not finish: pose=" + follower.getPose() +
                 ", t=" + follower.getBestT() +
@@ -204,7 +204,9 @@ public class ApexSimulationTest {
                 follower.getDrivetrain().getLastBrPower(), !follower.isBusy());
         assertTrue("Example auto path stopped too far from its endpoint",
                 follower.getPose().distanceTo(auto.testPath.getEndPose()).getIn() < 2.0);
-        assertEquals("Distance callback triggered!", auto.callbackMessage);
+        assertTrue("Outbound distance callback did not fire", auto.outboundCallbackTriggered);
+        assertTrue("Outbound path cross-track error was excessive: " + outboundCrossTrack,
+                outboundCrossTrack < 6.0);
 
         follower.follow(auto.testTurn);
         runMovement(hardware, follower, 8.0);
@@ -212,6 +214,38 @@ public class ApexSimulationTest {
         assertTrue("Example auto turn stopped at the wrong heading",
                 Math.abs(follower.getPose().getHeading().getShortestAngleTo(
                         auto.testTurn.getEndPose().getHeading()).getRad()) < Math.toRadians(3.0));
+        assertTrue("Angular callback did not fire", auto.turnCallbackTriggered);
+
+        follower.follow(auto.returnPath);
+        double returnCrossTrack = runMovement(hardware, follower, 12.0);
+        assertTrue("Reverse return path did not finish", !follower.isBusy());
+        assertTrue("Reverse return path stopped too far from home: " + follower.getPose(),
+                follower.getPose().distanceTo(auto.returnPath.getEndPose()).getIn() < 1.0);
+        assertTrue("Reverse return path ended at the wrong heading",
+                Math.abs(follower.getPose().getHeading().getShortestAngleTo(
+                        auto.returnPath.getEndPose().getHeading()).getRad()) < Math.toRadians(3.0));
+        assertTrue("Return distance callback did not fire", auto.returnCallbackTriggered);
+        assertTrue("Reverse path cross-track error was excessive: " + returnCrossTrack,
+                returnCrossTrack < 6.0);
+
+        follower.follow(auto.strafeOutPath);
+        double strafeOutCrossTrack = runMovement(hardware, follower, 8.0);
+        assertTrue("Outbound strafe did not finish", !follower.isBusy());
+        assertTrue("Outbound strafe stopped too far from its endpoint",
+                follower.getPose().distanceTo(auto.strafeOutPath.getEndPose()).getIn() < 1.0);
+        assertTrue("Outbound strafe cross-track error was excessive: " + strafeOutCrossTrack,
+                strafeOutCrossTrack < 6.0);
+
+        follower.follow(auto.strafeBackPath);
+        double strafeBackCrossTrack = runMovement(hardware, follower, 8.0);
+        assertTrue("Return strafe did not finish", !follower.isBusy());
+        assertTrue("Full auto sequence did not return to the origin: " + follower.getPose(),
+                follower.getPose().distanceTo(Pose.zero()).getIn() < 1.0);
+        assertTrue("Full auto sequence did not finish at zero heading",
+                Math.abs(follower.getPose().getHeading().getShortestAngleTo(
+                        Pose.zero().getHeading()).getRad()) < Math.toRadians(3.0));
+        assertTrue("Return strafe cross-track error was excessive: " + strafeBackCrossTrack,
+                strafeBackCrossTrack < 6.0);
     }
 
     private static void assertPose(Pose expected, Pose actual) {
@@ -266,14 +300,18 @@ public class ApexSimulationTest {
         return (MotionVector) forwardKinematics.invoke(hardware.drivetrain, (Object) wheelVelocities);
     }
 
-    private static void runMovement(ApexSimulation.Hardware hardware, Follower follower,
-                                    double timeoutSeconds) throws Exception {
+    private static double runMovement(ApexSimulation.Hardware hardware, Follower follower,
+                                      double timeoutSeconds) throws Exception {
         long deadline = System.nanoTime() + (long) (timeoutSeconds * 1e9);
+        double maximumCrossTrackError = 0.0;
         while (follower.isBusy() && System.nanoTime() < deadline) {
             stepPhysics(hardware, 0.02);
             follower.update();
+            maximumCrossTrackError = Math.max(maximumCrossTrackError,
+                    Math.abs(follower.getCrossTrackErrorIn()));
             Thread.sleep(20);
         }
+        return maximumCrossTrackError;
     }
 
     private static void stepPhysics(ApexSimulation.Hardware hardware, double dt) throws Exception {

@@ -455,8 +455,18 @@ public class Follower {
             Vector finalDriveOutput = lateralCommand.getRobotCommand()
                     .plus(tangentCommand.getRobotCommand());
 
-            // Must be moving slower than 5 in/s and be within distance tolerance to stop
-            if (distanceRemaining < distanceTol && robotVel.getMagSq().getIn() < 25) {
+            // Closest-point arc length alone is not an endpoint test: once bestT reaches 1.0 it
+            // becomes zero even if the robot is still several inches laterally displaced. Keep
+            // correcting until the complete pose is settled, especially for reverse curves where
+            // endpoint projection can reach t=1 before the chassis reaches the point itself.
+            double endpointDistance = currentPos.distanceTo(path.getEndPose().getVec()).getIn();
+            double endpointHeadingError = currentHeading.getShortestAngleTo(
+                    path.getEndPose().getHeading()).getRad();
+            double currentAngularVelocity = localizer.getVel().getHeading().getRad();
+            if (endpointDistance < distanceTol &&
+                    Math.abs(endpointHeadingError) < headingTol &&
+                    robotVel.getMagSq().getIn() < 25 &&
+                    Math.abs(currentAngularVelocity) < 0.05) {
                 stop();
                 return;
             }
