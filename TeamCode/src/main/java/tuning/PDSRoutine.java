@@ -425,6 +425,18 @@ public class PDSRoutine {
         context.getTelemetry().addLine("Automatic " + axis.toString().toLowerCase() +
                 " tuning in progress");
         context.getTelemetry().addLine(actionDescription(context));
+        if (state == PDSState.OPERATOR_CHECK) {
+            double position = getRelativePosition(context);
+            if (axis == Axis.HEADING) {
+                context.getTelemetry().addData("Target", round(Math.toDegrees(testTarget), 2) +
+                        " deg");
+                context.getTelemetry().addData("Position", round(Math.toDegrees(position), 2) +
+                        " deg");
+            } else {
+                context.getTelemetry().addData("Target", round(testTarget, 2) + " in");
+                context.getTelemetry().addData("Position", round(position, 2) + " in");
+            }
+        }
         if (!context.isDebugMode()) {
             context.getTelemetry().update();
             return;
@@ -454,7 +466,6 @@ public class PDSRoutine {
         }
         if (state == PDSState.OPERATOR_CHECK) {
             context.getTelemetry().addData("Operator tests completed", completedTestCount);
-            context.getTelemetry().addData("Current test target", testTarget);
             context.getTelemetry().addData("Current test error", testFinalError);
         }
         context.getTelemetry().addData("CSV", getCsvPath());
@@ -462,6 +473,11 @@ public class PDSRoutine {
                 ? "The robot remains stopped until you request or accept a test."
                 : "Keep the OpMode running until identification finishes.");
         context.getTelemetry().update();
+    }
+
+    private static double round(double value, int decimalPlaces) {
+        double scale = Math.pow(10.0, decimalPlaces);
+        return Math.round(value * scale) / scale;
     }
 
     private String actionDescription(TunerContext context) {
