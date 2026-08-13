@@ -58,4 +58,39 @@ public class PDSRoutineTest {
         assertTrue(analyzer.getCycleCount() >= 6);
         assertTrue(!analyzer.hasStableEstimate());
     }
+
+    @Test
+    public void relayAnalyzerToleratesOneIsolatedPeriodOutlier() {
+        RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.30, 0.10);
+        double[] periods = { 1.2, 1.2, 0.45, 1.2, 1.2, 1.2, 1.2 };
+        double time = 0.0;
+        double dt = 0.005;
+
+        for (double period : periods) {
+            double cycleEnd = time + period;
+            while (time < cycleEnd) {
+                double phase = (time - (cycleEnd - period)) / period;
+                analyzer.observe(time, 0.75 * Math.sin(2.0 * Math.PI * phase));
+                time += dt;
+            }
+        }
+
+        assertTrue(analyzer.getCycleCount() >= 6);
+        assertTrue(analyzer.hasStableEstimate());
+        assertEquals(1.2, analyzer.estimate().periodSeconds, 0.03);
+    }
+
+    @Test
+    public void relayDeadlineScalesWithObservedSlowCycles() {
+        RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.30, 0.10);
+        double period = 5.2;
+        double dt = 0.01;
+        for (double time = 0.0; time <= 13.0; time += dt) {
+            analyzer.observe(time, 0.20 * Math.sin(2.0 * Math.PI * time / period));
+        }
+
+        assertTrue(analyzer.getCycleCount() >= 2);
+        assertTrue(analyzer.recommendedTimeoutSeconds(16.0, 45.0) > 30.0);
+        assertTrue(analyzer.recommendedTimeoutSeconds(16.0, 45.0) <= 45.0);
+    }
 }

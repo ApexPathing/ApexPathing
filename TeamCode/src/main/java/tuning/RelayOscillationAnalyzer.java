@@ -6,29 +6,29 @@ import java.util.List;
 
 /**
  * Extracts repeatable oscillation amplitude and period from a bounded relay-feedback test based on
- * Åström and Hägglund's automatic-tuning method:
+ * Astrom and Hagglund's automatic-tuning method:
  * https://lup.lub.lu.se/record/8601786
  */
 final class RelayOscillationAnalyzer {
     private static final int WINDOW_CYCLES = 5;
     private static final int MIN_CYCLES_BEFORE_ACCEPT = 6;
-    private static final double MAX_AMPLITUDE_RELATIVE_SPREAD = 0.15;
-    private static final double MAX_PERIOD_RELATIVE_SPREAD = 0.12;
+    private static final double MAX_AMPLITUDE_RELATIVE_CENTRAL_SPREAD = 0.15;
+    private static final double MAX_PERIOD_RELATIVE_CENTRAL_SPREAD = 0.12;
 
     static final class Estimate {
         final double amplitude;
         final double periodSeconds;
         final double ultimateGain;
-        final double amplitudeRelativeSpread;
-        final double periodRelativeSpread;
+        final double amplitudeRelativeCentralSpread;
+        final double periodRelativeCentralSpread;
 
         Estimate(double amplitude, double periodSeconds, double ultimateGain,
-                 double amplitudeRelativeSpread, double periodRelativeSpread) {
+                 double amplitudeRelativeCentralSpread, double periodRelativeCentralSpread) {
             this.amplitude = amplitude;
             this.periodSeconds = periodSeconds;
             this.ultimateGain = ultimateGain;
-            this.amplitudeRelativeSpread = amplitudeRelativeSpread;
-            this.periodRelativeSpread = periodRelativeSpread;
+            this.amplitudeRelativeCentralSpread = amplitudeRelativeCentralSpread;
+            this.periodRelativeCentralSpread = periodRelativeCentralSpread;
         }
     }
 
@@ -85,11 +85,14 @@ final class RelayOscillationAnalyzer {
 
     int getCycleCount() { return amplitudes.size(); }
 
+    int getRequiredCycleCount() { return MIN_CYCLES_BEFORE_ACCEPT; }
+
     boolean hasStableEstimate() {
         if (amplitudes.size() < MIN_CYCLES_BEFORE_ACCEPT) { return false; }
         Estimate estimate = estimate();
-        return estimate.amplitudeRelativeSpread <= MAX_AMPLITUDE_RELATIVE_SPREAD &&
-                estimate.periodRelativeSpread <= MAX_PERIOD_RELATIVE_SPREAD;
+        return estimate.amplitudeRelativeCentralSpread <=
+                MAX_AMPLITUDE_RELATIVE_CENTRAL_SPREAD &&
+                estimate.periodRelativeCentralSpread <= MAX_PERIOD_RELATIVE_CENTRAL_SPREAD;
     }
 
     Estimate estimate() {
@@ -100,11 +103,31 @@ final class RelayOscillationAnalyzer {
         double[] recentPeriods = tail(periods, WINDOW_CYCLES);
         double amplitude = median(recentAmplitudes);
         double period = median(recentPeriods);
-        double amplitudeRelativeSpread = relativeSpread(recentAmplitudes, amplitude);
-        double periodRelativeSpread = relativeSpread(recentPeriods, period);
+        double amplitudeRelativeCentralSpread = relativeCentralSpread(
+                recentAmplitudes, amplitude);
+        double periodRelativeCentralSpread = relativeCentralSpread(recentPeriods, period);
         double ultimateGain = 4.0 * relayPower / (Math.PI * amplitude);
         return new Estimate(amplitude, period, ultimateGain,
-                amplitudeRelativeSpread, periodRelativeSpread);
+                amplitudeRelativeCentralSpread, periodRelativeCentralSpread);
+    }
+
+    /**
+     * Chooses an absolute timeout from the periods already measured. The extra cycle margin lets a
+     * single anomalous cycle age out of the five-cycle estimation window without allowing an
+     * unbounded robot test.
+     */
+    double recommendedTimeoutSeconds(double minimumSeconds, double maximumSeconds) {
+        if (periods.size() < 2) { return minimumSeconds; }
+
+        double conservativePeriod = 0.0;
+        int first = Math.max(0, periods.size() - WINDOW_CYCLES);
+        for (int i = first; i < periods.size(); i++) {
+            conservativePeriod = Math.max(conservativePeriod, periods.get(i));
+        }
+        int cyclesStillNeeded = Math.max(0, MIN_CYCLES_BEFORE_ACCEPT - periods.size());
+        double projectedDeadline = cycleStartSeconds +
+                (cyclesStillNeeded + 1.0) * conservativePeriod;
+        return Math.min(maximumSeconds, Math.max(minimumSeconds, projectedDeadline));
     }
 
     private static double[] tail(List<Double> source, int count) {
@@ -114,12 +137,21 @@ final class RelayOscillationAnalyzer {
         return result;
     }
 
-    private static double relativeSpread(double[] values, double center) {
-        double maximumDeviation = 0.0;
-        for (double value : values) {
-            maximumDeviation = Math.max(maximumDeviation, Math.abs(value - center));
-        }
-        return maximumDeviation / Math.max(Math.abs(center), 1e-9);
+    private static double relativeCentralSpread(double[] values, double center) {
+        double[] sorted = values.clone();
+        Arrays.sort(sorted);
+        double lowerQuartile = percentile(sorted, 0.25);
+        double upperQuartile = percentile(sorted, 0.75);
+        return (upperQuartile - lowerQuartile) / Math.max(Math.abs(center), 1e-9);
+    }
+
+    private static double percentile(double[] sorted, double fraction) {
+        double index = fraction * (sorted.length - 1);
+        int lower = (int) Math.floor(index);
+        int upper = (int) Math.ceil(index);
+        if (lower == upper) { return sorted[lower]; }
+        double interpolation = index - lower;
+        return sorted[lower] + (sorted[upper] - sorted[lower]) * interpolation;
     }
 
     private static double median(double[] values) {

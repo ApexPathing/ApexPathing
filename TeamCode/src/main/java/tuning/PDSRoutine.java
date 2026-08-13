@@ -35,7 +35,8 @@ public class PDSRoutine {
     private static final double HEADING_THRESHOLD = 0.02;
     private static final double GUESS_TIME_MS = 1500.0;
     private static final double SETTLING_TIME_MS = 750.0;
-    private static final double RELAY_TIMEOUT_SECONDS = 24.0;
+    private static final double RELAY_MIN_TIMEOUT_SECONDS = 16.0;
+    private static final double RELAY_MAX_TIMEOUT_SECONDS = 45.0;
     private static final double VALIDATION_TIMEOUT_SECONDS = 4.0;
     private static final double VALIDATION_SETTLED_SECONDS = 0.50;
     private static final double MAX_VALIDATION_POWER = 0.75;
@@ -59,6 +60,7 @@ public class PDSRoutine {
     private boolean validationPassed;
     private String validationSummary = "Not run";
     private TuningCsvWriter csv;
+    private double relayDeadlineSeconds = RELAY_MIN_TIMEOUT_SECONDS;
 
     PDSRoutine(TunerContext context, Axis axis) {
         search = new BinarySearch(0.0, 0.4, 0.01);
@@ -200,11 +202,15 @@ public class PDSRoutine {
     }
 
     private void beginRelayTest(TunerContext context) {
-        double basePower = axis == Axis.HEADING ? 0.22 : 0.30;
-        double relayPower = Math.min(0.55,
-                Math.max(basePower, Math.abs(controller.getCoefficients().kS) + 0.08));
-        double hysteresis = axis == Axis.HEADING ? Math.toRadians(5.0) : 1.5;
+        double basePower = axis == Axis.HEADING ? 0.38 : 0.35;
+        double excitationMargin = axis == Axis.HEADING ? 0.16 : 0.12;
+        double relayPower = Math.min(0.60, Math.max(
+                basePower,
+                Math.abs(controller.getCoefficients().kS) + excitationMargin
+        ));
+        double hysteresis = axis == Axis.HEADING ? Math.toRadians(4.0) : 1.5;
         relay = new RelayOscillationAnalyzer(relayPower, hysteresis);
+        relayDeadlineSeconds = RELAY_MIN_TIMEOUT_SECONDS;
         validationSummary = "Collecting repeatable relay cycles";
     }
 
@@ -221,10 +227,13 @@ public class PDSRoutine {
         move(context, command);
         logSample(context, 0.0, position, command);
 
-        boolean timedOut = elapsed >= RELAY_TIMEOUT_SECONDS;
+        relayDeadlineSeconds = relay.recommendedTimeoutSeconds(
+                RELAY_MIN_TIMEOUT_SECONDS, RELAY_MAX_TIMEOUT_SECONDS);
+        boolean timedOut = elapsed >= relayDeadlineSeconds;
         if (!relay.hasStableEstimate() && !timedOut) { return false; }
-        if (relay.getCycleCount() < 5) {
-            abort(context, "Relay test did not produce five complete oscillations");
+        if (relay.getCycleCount() < relay.getRequiredCycleCount()) {
+            abort(context, "Relay test produced only " + relay.getCycleCount() + " of " +
+                    relay.getRequiredCycleCount() + " required complete oscillations");
         }
         if (!relay.hasStableEstimate()) {
             abort(context, "Relay oscillations were not repeatable enough to tune safely");
@@ -338,7 +347,10 @@ public class PDSRoutine {
         context.getTelemetry().addData("Step", state.toString().replace('_', ' '));
         context.getTelemetry().addData("Static guess", search.getGuess());
         if (relay != null) {
-            context.getTelemetry().addData("Stable relay cycles", relay.getCycleCount());
+            context.getTelemetry().addData("Complete relay cycles",
+                    relay.getCycleCount() + " / " + relay.getRequiredCycleCount());
+            context.getTelemetry().addData("Adaptive relay deadline",
+                    relayDeadlineSeconds + " s");
         }
         if (relayEstimate != null) {
             context.getTelemetry().addData("Ultimate gain", relayEstimate.ultimateGain);
