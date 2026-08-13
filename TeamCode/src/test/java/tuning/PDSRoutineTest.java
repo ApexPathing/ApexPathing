@@ -116,12 +116,42 @@ public class PDSRoutineTest {
     public void translationalRelayHasReserveAboveBreakawayPower() {
         double staticGain = 0.24375;
 
-        assertEquals(0.46375,
+        assertEquals(0.54625,
                 PDSRoutine.relayPowerFor(PDSRoutine.Axis.DRIVE, staticGain), 1e-9);
-        assertEquals(0.46375,
+        assertEquals(0.54625,
                 PDSRoutine.relayPowerFor(PDSRoutine.Axis.STRAFE, staticGain), 1e-9);
         assertTrue(PDSRoutine.relayPowerFor(PDSRoutine.Axis.DRIVE, staticGain) >=
-                staticGain + 0.20);
+                staticGain + 0.30);
+    }
+
+    @Test
+    public void headingRelayUsesAvailableAuthorityAboveBreakawayPower() {
+        assertEquals(0.5003125,
+                PDSRoutine.relayPowerFor(PDSRoutine.Axis.HEADING, 0.23125), 1e-9);
+        assertEquals(0.48,
+                PDSRoutine.relayPowerFor(PDSRoutine.Axis.HEADING, 0.0), 1e-9);
+        assertEquals(0.75,
+                PDSRoutine.relayPowerFor(PDSRoutine.Axis.HEADING, 0.90), 1e-9);
+    }
+
+    @Test
+    public void discardedCycleDoesNotPairMeasurementsAcrossLoopStall() {
+        RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.50, 0.10);
+
+        analyzer.observe(0.0, 0.11);
+        analyzer.observe(0.5, -0.11);
+        analyzer.discardCurrentCycle();
+        analyzer.observe(1.0, 0.11);
+        analyzer.observe(1.5, -0.11);
+        analyzer.observe(2.0, 0.11);
+        analyzer.observe(2.5, -0.11);
+        analyzer.observe(3.0, 0.11);
+
+        assertEquals(1, analyzer.getDiscardedCycleCount());
+        assertEquals(2, analyzer.getCycleCount());
+        assertEquals(2, analyzer.getUsableCycleCount());
+        assertFalse("Only adjacent post-stall cycles may form a phase pair",
+                analyzer.canEstimate());
     }
 
     @Test

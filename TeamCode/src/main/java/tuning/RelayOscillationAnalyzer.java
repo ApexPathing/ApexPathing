@@ -49,6 +49,8 @@ final class RelayOscillationAnalyzer {
     private double cycleStartSeconds;
     private double cycleMinimum;
     private double cycleMaximum;
+    private Double pendingPairPeriod;
+    private int discardedCycleCount;
 
     RelayOscillationAnalyzer(double relayPower, double hysteresis) {
         if (!Double.isFinite(relayPower) || relayPower <= 0.0 || relayPower > 1.0 ||
@@ -81,9 +83,11 @@ final class RelayOscillationAnalyzer {
                     // cycle is long and the next correspondingly short even though their combined
                     // phase and amplitude are repeatable. Non-overlapping two-cycle windows expose
                     // that stable aggregate without counting either cycle twice.
-                    if (periods.size() % CYCLES_PER_PHASE_PAIR == 0) {
-                        int last = periods.size() - 1;
-                        phasePairPeriods.add((periods.get(last - 1) + periods.get(last)) / 2.0);
+                    if (pendingPairPeriod == null) {
+                        pendingPairPeriod = period;
+                    } else {
+                        phasePairPeriods.add((pendingPairPeriod + period) / 2.0);
+                        pendingPairPeriod = null;
                     }
                 }
             }
@@ -98,9 +102,28 @@ final class RelayOscillationAnalyzer {
 
     double getCommand() { return commandSign * relayPower; }
 
+    /**
+     * Drops the cycle currently spanning a missed or severely delayed control-loop sample.
+     * Keeping it would attribute an unobserved interval to the drivetrain dynamics and corrupt
+     * both the measured amplitude and period. The pending period-two pair is also cleared so two
+     * non-adjacent cycles are never averaged together.
+     */
+    void discardCurrentCycle() {
+        if (cycleStarted) { discardedCycleCount++; }
+        cycleStarted = false;
+        pendingPairPeriod = null;
+    }
+
     int getCycleCount() { return amplitudes.size(); }
 
     int getRequiredCycleCount() { return MIN_CYCLES_BEFORE_ACCEPT; }
+
+    int getDiscardedCycleCount() { return discardedCycleCount; }
+
+    int getUsableCycleCount() {
+        return phasePairPeriods.size() * CYCLES_PER_PHASE_PAIR +
+                (pendingPairPeriod == null ? 0 : 1);
+    }
 
     boolean canEstimate() { return phasePairPeriods.size() >= WINDOW_PHASE_PAIRS; }
 

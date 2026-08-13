@@ -34,6 +34,7 @@ public class PDSRoutine {
     private static final double SETTLING_TIME_MS = 750.0;
     private static final double RELAY_MIN_TIMEOUT_SECONDS = 16.0;
     private static final double RELAY_MAX_TIMEOUT_SECONDS = 60.0;
+    private static final double MAX_RELAY_SAMPLE_GAP_SECONDS = 0.100;
     private static final double VALIDATION_TIMEOUT_SECONDS = 4.0;
     private static final double VALIDATION_SETTLED_SECONDS = 0.50;
     private static final double MAX_VALIDATION_POWER = 0.75;
@@ -58,6 +59,7 @@ public class PDSRoutine {
     private String validationSummary = "Not run";
     private TuningCsvWriter csv;
     private double relayDeadlineSeconds = RELAY_MIN_TIMEOUT_SECONDS;
+    private double lastRelaySampleSeconds = Double.NaN;
 
     PDSRoutine(TunerContext context, Axis axis) {
         search = new BinarySearch(0.0, 0.4, 0.01);
@@ -85,7 +87,7 @@ public class PDSRoutine {
                 "time_s", "axis", "state", "target", "position", "error",
                 "velocity", "command", "relay_cycles", "relay_amplitude",
                 "relay_period_s", "relay_amplitude_spread", "relay_period_spread",
-                "relay_deadline_s"
+                "relay_deadline_s", "relay_usable_cycles", "relay_discarded_cycles"
         );
     }
 
@@ -198,19 +200,23 @@ public class PDSRoutine {
         double hysteresis = axis == Axis.HEADING ? Math.toRadians(4.0) : 1.5;
         relay = new RelayOscillationAnalyzer(relayPower, hysteresis);
         relayDeadlineSeconds = RELAY_MIN_TIMEOUT_SECONDS;
+        lastRelaySampleSeconds = Double.NaN;
         validationSummary = "Collecting repeatable relay cycles";
     }
 
     /**
-     * Keeps relay excitation clearly above the measured breakaway command. Translational relay
-     * motion needs more reserve than the kS search itself: a command that only barely starts the
-     * wheels can repeatedly fall back into static friction after each reversal, producing a very
-     * slow stick-slip cycle whose period is not useful for controller identification.
+     * Keeps relay excitation clearly above the measured breakaway command. A fraction of the
+     * remaining motor authority is used instead of a small fixed increment: this keeps reversals
+     * decisive across drivetrains with different static friction while leaving ample safety
+     * reserve below full power.
      */
     static double relayPowerFor(Axis axis, double staticGain) {
-        double basePower = axis == Axis.HEADING ? 0.38 : 0.40;
-        double excitationMargin = axis == Axis.HEADING ? 0.16 : 0.22;
-        return Math.min(0.65, Math.max(basePower, Math.abs(staticGain) + excitationMargin));
+        double breakawayPower = Range.clip(Math.abs(staticGain), 0.0, 1.0);
+        double usablePowerFraction = axis == Axis.HEADING ? 0.35 : 0.40;
+        double minimumPower = axis == Axis.HEADING ? 0.48 : 0.52;
+        double excitationPower = breakawayPower +
+                usablePowerFraction * (1.0 - breakawayPower);
+        return Math.min(0.75, Math.max(minimumPower, excitationPower));
     }
 
     private boolean updateRelay(TunerContext context) {
@@ -221,6 +227,11 @@ public class PDSRoutine {
             abort(context, "Relay test exceeded its bounded travel envelope");
         }
 
+        if (Double.isFinite(lastRelaySampleSeconds) &&
+                elapsed - lastRelaySampleSeconds > MAX_RELAY_SAMPLE_GAP_SECONDS) {
+            relay.discardCurrentCycle();
+        }
+        lastRelaySampleSeconds = elapsed;
         relay.observe(elapsed, position);
         double command = relay.getCommand();
         move(context, command);
@@ -230,9 +241,11 @@ public class PDSRoutine {
         logSample(context, 0.0, position, command);
         boolean timedOut = elapsed >= relayDeadlineSeconds;
         if (!relay.hasStableEstimate() && !timedOut) { return false; }
-        if (relay.getCycleCount() < relay.getRequiredCycleCount()) {
-            abort(context, "Relay test produced only " + relay.getCycleCount() + " of " +
-                    relay.getRequiredCycleCount() + " required complete oscillations");
+        if (!relay.canEstimate()) {
+            abort(context, "Relay test produced only " + relay.getUsableCycleCount() + " of " +
+                    relay.getRequiredCycleCount() + " required usable oscillations" +
+                    (relay.getDiscardedCycleCount() == 0 ? "" : " after dropping " +
+                            relay.getDiscardedCycleCount() + " loop-stalled cycle(s)"));
         }
         if (!relay.hasStableEstimate()) {
             RelayOscillationAnalyzer.Estimate candidate = relay.estimate();
@@ -334,7 +347,9 @@ public class PDSRoutine {
                 candidate == null ? "" : candidate.periodSeconds,
                 candidate == null ? "" : candidate.amplitudeRelativeCentralSpread,
                 candidate == null ? "" : candidate.periodRelativeCentralSpread,
-                relay == null ? "" : relayDeadlineSeconds
+                relay == null ? "" : relayDeadlineSeconds,
+                relay == null ? 0 : relay.getUsableCycleCount(),
+                relay == null ? 0 : relay.getDiscardedCycleCount()
         );
     }
 
@@ -366,8 +381,10 @@ public class PDSRoutine {
         context.getTelemetry().addData("Step", state.toString().replace('_', ' '));
         context.getTelemetry().addData("Static guess", search.getGuess());
         if (relay != null) {
-            context.getTelemetry().addData("Complete relay cycles",
-                    relay.getCycleCount() + " / " + relay.getRequiredCycleCount());
+            context.getTelemetry().addData("Usable relay cycles",
+                    relay.getUsableCycleCount() + " / " + relay.getRequiredCycleCount());
+            context.getTelemetry().addData("Cycles dropped after loop stalls",
+                    relay.getDiscardedCycleCount());
             context.getTelemetry().addData("Adaptive relay deadline",
                     relayDeadlineSeconds + " s");
             if (relay.canEstimate()) {

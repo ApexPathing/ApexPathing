@@ -74,7 +74,7 @@ public final class ApexSimulation {
         config.robotGeometry = new RobotGeometry(12, 18, 2, 0);
 
         SimulatedDrivetrain drivetrain = new SimulatedMecanum(config);
-        SimHardwareMap hardwareMap = new SimHardwareMap();
+        SimHardwareMap hardwareMap = new StableSimHardwareMap();
         hardwareMap.register(drivetrain);
 
         // Put Apex's centered origin at the center of FTCodeSim's corner-origin field.
