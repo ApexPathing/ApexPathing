@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+import org.psilynx.psikit.core.Logger;
 import org.psilynx.psikit.core.wpi.math.Pose2d;
 
 import geometry.Angle;
@@ -31,10 +32,7 @@ public class ApexAdvantageScopeLoggerTest {
 
     @Test
     public void convertsGeneratedPathToStructuredPoseArray() {
-        Path path = new HolonomicPathBuilder(
-                new Pose(Vector.zero(), Angle.zero()),
-                new Pose(Vector.of(10.0, 0.0, DistUnit.IN), Angle.zero())
-        ).interpolateWith(InterpolationStyle.CONSTANT_START_HEADING).quickBuild();
+        Path path = straightPath();
 
         Pose2d[] converted = ApexAdvantageScopeLogger.toFtcPath(path);
 
@@ -45,5 +43,35 @@ public class ApexAdvantageScopeLoggerTest {
         assertEquals(0.254, converted[converted.length - 1].getY(), EPSILON);
         assertEquals(Math.PI / 2.0,
                 converted[converted.length - 1].getRotation().getRadians(), EPSILON);
+    }
+
+    @Test
+    public void queuedPoseAndPathSnapshotsSerializeOnFlush() {
+        Logger.reset();
+        Logger.disableConsoleCapture();
+        Logger.start();
+        try {
+            ApexAdvantageScopeLogger logger = new ApexAdvantageScopeLogger();
+            logger.recordPose(new Pose(
+                    Vector.of(10.0, 20.0, DistUnit.IN), Angle.zero()));
+            logger.recordCurrentPath(straightPath());
+            logger.flush();
+
+            logger.recordPose(new Pose(
+                    Vector.of(11.0, 21.0, DistUnit.IN), Angle.fromRad(0.1)));
+            logger.flush();
+            logger.clearCurrentPath();
+            logger.flush();
+        } finally {
+            Logger.end();
+            Logger.reset();
+        }
+    }
+
+    private static Path straightPath() {
+        return new HolonomicPathBuilder(
+                new Pose(Vector.zero(), Angle.zero()),
+                new Pose(Vector.of(10.0, 0.0, DistUnit.IN), Angle.zero())
+        ).interpolateWith(InterpolationStyle.CONSTANT_START_HEADING).quickBuild();
     }
 }

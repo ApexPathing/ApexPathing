@@ -4,6 +4,8 @@ import org.psilynx.psikit.core.Logger;
 import org.psilynx.psikit.core.wpi.math.Pose2d;
 import org.psilynx.psikit.core.wpi.math.Rotation2d;
 
+import java.util.concurrent.atomic.AtomicReference;
+
 import core.FollowerDiagnostics;
 import geometry.Angle;
 import geometry.AngleUnit;
@@ -19,19 +21,42 @@ final class ApexAdvantageScopeLogger implements FollowerDiagnostics {
     static final String CURRENT_PATH_KEY = "Apex/CurrentPath";
     private static final double METERS_PER_INCH = 0.0254;
 
+    private volatile Pose2d latestPose;
+    private final AtomicReference<Pose2d[]> pendingPath =
+            new AtomicReference<Pose2d[]>();
+
     @Override
     public void recordPose(Pose pose) {
-        Logger.recordOutput(ESTIMATED_POSE_KEY, toFtcPose(pose));
+        latestPose = toFtcPose(pose);
     }
 
     @Override
     public void recordCurrentPath(Path path) {
-        Logger.recordOutput(CURRENT_PATH_KEY, toFtcPath(path));
+        pendingPath.set(toFtcPath(path));
     }
 
     @Override
     public void clearCurrentPath() {
-        Logger.recordOutput(CURRENT_PATH_KEY, new Pose2d[0]);
+        pendingPath.set(new Pose2d[0]);
+    }
+
+    /**
+     * Writes queued snapshots from FTCodeSim's event-loop thread.
+     *
+     * <p>PsiKit caches one mutable StructBuffer per geometry type. FTCodeSim also logs Pose2d
+     * values during its hardware update, so writing directly from the LinearOpMode thread races
+     * that shared buffer and can produce a BufferOverflowException.</p>
+     */
+    void flush() {
+        Pose2d pose = latestPose;
+        if (pose != null) {
+            Logger.recordOutput(ESTIMATED_POSE_KEY, pose);
+        }
+
+        Pose2d[] path = pendingPath.getAndSet(null);
+        if (path != null) {
+            Logger.recordOutput(CURRENT_PATH_KEY, path);
+        }
     }
 
     static Pose2d[] toFtcPath(Path path) {
