@@ -211,7 +211,8 @@ public class VelocityFeedbackPhase extends TuningPhase {
                             (candidate + 1) + " timed out during " +
                             (forwardIsRunning ? "outbound" : "return") +
                             " travel at gain " + gains[candidate] + ". Pose=" +
-                            context.getFollower().getPose() +
+                            context.getFollower().getPose() + ", velocity=" +
+                            context.getFollower().getVelocity() +
                             ". Verify localization, feedforward, and PDS constants."
             );
         }

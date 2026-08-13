@@ -13,6 +13,8 @@ import feedforward.MotionParameters;
  */
 public class TurnController {
     private static final double EPSILON = 1e-6;
+    private static final double STALLED_ANGULAR_VELOCITY = 0.05;
+    private static final double BREAKAWAY_RESERVE = 0.02;
 
     private final PDSController headingPds;
     private double angularKV;
@@ -87,7 +89,32 @@ public class TurnController {
         double velocityFeedback = angularVelocityFeedbackGain
                 * (targetVelocity - measuredAngularVelocity);
 
-        return clip(feedforward + velocityFeedback);
+        double requestedPower = feedforward + velocityFeedback;
+        return clip(ensureProfiledMotionBreakaway(
+                requestedPower,
+                targetVelocity,
+                measuredAngularVelocity,
+                headingPds.getCoefficients().kS
+        ));
+    }
+
+    /**
+     * Restores enough authority to restart a profiled turn if deceleration feedforward cancels
+     * the velocity/static terms below breakaway while the profile still requests motion.
+     */
+    static double ensureProfiledMotionBreakaway(double requestedPower, double targetVelocity,
+                                                 double measuredVelocity, double staticGain) {
+        if (Math.abs(targetVelocity) <= EPSILON ||
+                Math.abs(measuredVelocity) >= STALLED_ANGULAR_VELOCITY) {
+            return requestedPower;
+        }
+
+        double minimumPower = Math.min(1.0, Math.abs(staticGain) + BREAKAWAY_RESERVE);
+        if (Math.abs(requestedPower) >= minimumPower &&
+                Math.signum(requestedPower) == Math.signum(targetVelocity)) {
+            return requestedPower;
+        }
+        return Math.copySign(minimumPower, targetVelocity);
     }
 
     public void reset() {

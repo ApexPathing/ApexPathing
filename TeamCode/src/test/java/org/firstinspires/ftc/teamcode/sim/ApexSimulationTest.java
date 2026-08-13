@@ -298,11 +298,26 @@ public class ApexSimulationTest {
     }
 
     @Test
-    public void velocityFeedbackAngularTrialCompletesBothDirections() throws Exception {
+    public void velocityFeedbackAngularCandidatesCompleteBothDirections() throws Exception {
+        double center = 0.2466970500838876;
+        double[] firstRoundGains = { center * 0.5, center, center * 1.5 };
+        for (double gain : firstRoundGains) {
+            runVelocityFeedbackAngularTrial(gain);
+        }
+    }
+
+    private static void runVelocityFeedbackAngularTrial(double gain) throws Exception {
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         configureKnownFollowerConstants();
+        FollowerConstants constants = FollowerConstants.getInstance();
+        constants.angularCoeffs = new PDSCoefficients(
+                2.189285375109406, 0.2466970500838876, 0.24375);
+        constants.angularKV = 0.13651719918241684;
+        constants.angularKA = 0.05331768750185841;
+        constants.angularVelLimitRad = 6.958830137809905;
+        constants.angularAccelLimitRad = 17.81772699663479;
         Follower follower = new Follower(new Constants(), hardware.hardwareMap);
-        follower.setVelocityFeedback(0.0251, 0.3407374361258885);
+        follower.setVelocityFeedback(0.0251, gain);
 
         GeometryFactory factory = new GeometryFactory(follower)
                 .setDistUnit(geometry.DistUnit.IN)
@@ -317,12 +332,14 @@ public class ApexSimulationTest {
         follower.setPose(start);
         follower.follow(outbound);
         runMovement(hardware, follower, 8.0);
-        assertTrue("Velocity-feedback outbound turn did not finish: " + follower.getPose(),
+        assertTrue("Velocity-feedback outbound turn did not finish at gain " + gain + ": " +
+                        follower.getPose(),
                 !follower.isBusy());
 
         follower.follow(returning);
         runMovement(hardware, follower, 8.0);
-        assertTrue("Velocity-feedback return turn did not finish: " + follower.getPose(),
+        assertTrue("Velocity-feedback return turn did not finish at gain " + gain + ": " +
+                        follower.getPose(),
                 !follower.isBusy());
         assertTrue("Velocity-feedback return turn did not settle at zero heading",
                 Math.abs(follower.getPose().getHeading().getRad()) < Math.toRadians(2.0));
