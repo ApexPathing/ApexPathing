@@ -52,16 +52,13 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
     public void update() {
         pinpoint.update();
         pose = pinpoint.getPosition();
-        velocity = pinpoint.getVelocity();
-        calculate(UpdateType.ACCELERATION);
+        calculate(pinpoint.getVelocity());
     }
 
     @Override
     public void setPose(Pose newPose) {
         pinpoint.setPosition(newPose);
-        // Keep getPose() coherent until the next sensor update. This matters after tuner staging
-        // resets, where movement is measured relative to the newly requested pose immediately.
-        pose = newPose;
+        resetKinematicEstimate(newPose);
     }
 
     /** Configuration class for goBILDA Pinpoint localizer. */

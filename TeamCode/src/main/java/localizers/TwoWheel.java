@@ -69,6 +69,7 @@ public class TwoWheel extends BaseLocalizer<TwoWheel.Constants> {
         pose = newPose;
         strafePod.reset();
         forwardPod.reset();
+        resetKinematicEstimate(newPose);
     }
 
     public static class Constants implements BaseLocalizerConstants<Constants> {

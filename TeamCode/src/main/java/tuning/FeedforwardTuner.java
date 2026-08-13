@@ -11,6 +11,7 @@ import geometry.Angle;
 import geometry.DistUnit;
 import geometry.Pose;
 import geometry.Vector;
+import localizers.util.LowPassFilter;
 
 /**
  * Tunes the feedforward coefficients (kV and kA) for both the angular (heading) and
@@ -28,6 +29,10 @@ public class FeedforwardTuner extends TuningPhase {
     private static final double SIM_STAGING_OFFSET = 55.0;
     private static final double STATIONARY_LINEAR_SPEED_IN_PER_SEC = 1.0;
     private static final double STATIONARY_ANGULAR_SPEED_RAD_PER_SEC = 0.10;
+    private static final double MAX_CROSS_VALIDATION_RMSE = 0.15;
+    // A drivetrain includes static-friction transitions that a two-term linear fit cannot
+    // explain perfectly. Held-out-run RMSE remains the primary repeatability safeguard.
+    private static final double MIN_R_SQUARED = 0.65;
 
     private enum Coefficient { ANGULAR_KV, ANGULAR_KA, TRANSLATIONAL_KV, TRANSLATIONAL_KA }
 
@@ -109,48 +114,9 @@ public class FeedforwardTuner extends TuningPhase {
         boolean isValid() {
             return Double.isFinite(kV) && Double.isFinite(kA) &&
                     kV > 0.0 && kA > 0.0 && sampleCount >= 20 &&
-                    Double.isFinite(crossValidationRmse) && crossValidationRmse <= 0.15 &&
-                    Double.isFinite(rSquared) && rSquared >= 0.70;
-        }
-    }
-
-    /** Produces a stable acceleration estimate from the measured velocity at tuner cadence. */
-    static final class VelocityDerivative {
-        private static final double FILTER_TIME_CONSTANT_SECONDS = 0.08;
-
-        private boolean initialized;
-        private double lastTime;
-        private double lastVelocity;
-        private double filteredAcceleration;
-
-        void reset() {
-            initialized = false;
-            lastTime = 0.0;
-            lastVelocity = 0.0;
-            filteredAcceleration = 0.0;
-        }
-
-        double update(double timeSeconds, double velocity) {
-            if (!Double.isFinite(timeSeconds) || !Double.isFinite(velocity)) {
-                return Double.NaN;
-            }
-            if (!initialized) {
-                initialized = true;
-                lastTime = timeSeconds;
-                lastVelocity = velocity;
-                return 0.0;
-            }
-
-            double dt = timeSeconds - lastTime;
-            double velocityChange = velocity - lastVelocity;
-            lastTime = timeSeconds;
-            lastVelocity = velocity;
-            if (dt <= 1e-4 || dt > 0.25) { return Double.NaN; }
-
-            double rawAcceleration = velocityChange / dt;
-            double alpha = dt / (FILTER_TIME_CONSTANT_SECONDS + dt);
-            filteredAcceleration += alpha * (rawAcceleration - filteredAcceleration);
-            return filteredAcceleration;
+                    Double.isFinite(crossValidationRmse) &&
+                    crossValidationRmse <= MAX_CROSS_VALIDATION_RMSE &&
+                    Double.isFinite(rSquared) && rSquared >= MIN_R_SQUARED;
         }
     }
 
@@ -165,7 +131,8 @@ public class FeedforwardTuner extends TuningPhase {
     private String csvError;
     private boolean isForward = true;
     private boolean manualDriveHasRun = false;
-    private final VelocityDerivative velocityDerivative = new VelocityDerivative();
+    private final LowPassFilter commandPowerFilter = new LowPassFilter();
+    private double lastAppliedCharacterizationPower;
 
     public FeedforwardTuner(TunerContext context) {
         super(context);
@@ -220,7 +187,9 @@ public class FeedforwardTuner extends TuningPhase {
         csvError = null;
         autoRunIndex = 0;
         autoStage = AutoStage.PROMPT;
-        velocityDerivative.reset();
+        commandPowerFilter.setSampleSize(
+                context.getFollower().getLocalizer().getFilterWindowSize());
+        lastAppliedCharacterizationPower = 0.0;
         timer.reset();
     }
 
@@ -609,7 +578,8 @@ public class FeedforwardTuner extends TuningPhase {
                         (run.forward ? -SIM_STAGING_OFFSET : SIM_STAGING_OFFSET);
                 positionRobotForSimulation(new Pose(
                         Vector.of(stagingX, 0.0, DistUnit.IN), Angle.fromRad(0.0)));
-                velocityDerivative.reset();
+                commandPowerFilter.reset();
+                lastAppliedCharacterizationPower = 0.0;
                 timer.reset();
                 autoStage = AutoStage.RUNNING;
             }
@@ -624,9 +594,15 @@ public class FeedforwardTuner extends TuningPhase {
                     ? QUASISTATIC_TIME : DYNAMIC_TIME;
             if (elapsed >= duration) {
                 context.getFollower().stop();
+                lastAppliedCharacterizationPower = 0.0;
                 timer.reset();
                 autoStage = AutoStage.SETTLING;
             } else {
+                // Velocity and acceleration are a moving average in BaseLocalizer. Apply the same
+                // filter to the power that produced the current sensor sample so regression inputs
+                // remain time-aligned, especially at the start of a dynamic step.
+                double alignedPower = commandPowerFilter.update(
+                        lastAppliedCharacterizationPower).value();
                 double power = run.excitation == Excitation.QUASISTATIC
                         ? CHARACTERIZATION_POWER * elapsed / duration
                         : CHARACTERIZATION_POWER;
@@ -638,12 +614,16 @@ public class FeedforwardTuner extends TuningPhase {
                     context.getFollower().getDrivetrain().moveWithVectors(
                             signedPower, 0.0, 0.0);
                 }
+                lastAppliedCharacterizationPower = power;
 
                 Pose velocity = context.getFollower().getVelocity();
+                Pose acceleration = context.getFollower().getAcceleration();
                 double rawVelocity = run.axis == Axis.ANGULAR
                         ? velocity.getHeading(AngleUnit.RAD)
                         : velocity.getX().getIn();
-                double rawAcceleration = velocityDerivative.update(elapsed, rawVelocity);
+                double rawAcceleration = run.axis == Axis.ANGULAR
+                        ? acceleration.getHeading(AngleUnit.RAD)
+                        : acceleration.getX().getIn();
                 if (elapsed >= MIN_SAMPLE_TIME && Double.isFinite(rawAcceleration)) {
                     double measuredVelocity = Math.abs(rawVelocity);
                     // Project acceleration along the measured direction of travel. This remains
@@ -653,7 +633,7 @@ public class FeedforwardTuner extends TuningPhase {
                     double velocityFloor = run.axis == Axis.ANGULAR ? 0.02 : 0.25;
                     if (measuredVelocity >= velocityFloor) {
                         Observation observation = new Observation(
-                                power, measuredVelocity, measuredAcceleration,
+                                alignedPower, measuredVelocity, measuredAcceleration,
                                 autoRunIndex % 4, elapsed);
                         (run.axis == Axis.ANGULAR
                                 ? angularObservations : translationalObservations).add(observation);

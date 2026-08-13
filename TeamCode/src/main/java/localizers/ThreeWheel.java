@@ -65,6 +65,7 @@ public class ThreeWheel extends BaseLocalizer<ThreeWheel.Constants> {
         forwardLeftPod.reset();
         forwardRightPod.reset();
         strafePod.reset();
+        resetKinematicEstimate(newPose);
     }
 
     public static class Constants implements BaseLocalizerConstants<Constants> {

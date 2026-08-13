@@ -40,10 +40,8 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
     protected Pose acceleration = Pose.zero();
     protected Pose rawAcceleration = Pose.zero();
 
-    /** Only used for calculating velocity on some localizers */
+    /** History shared by pose-derived and native-velocity localizers. */
     private Pose prevPose = Pose.zero();
-
-    /** Only used for calculating acceleration on some localizers */
     private Pose prevRawVelocity = Pose.zero();
     private long prevTimeNs = -1;
 
@@ -81,6 +79,9 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
      */
     public Pose getRawAccel() { return rawAcceleration; }
 
+    /** @return the velocity filter's moving-average window size in samples */
+    public int getFilterWindowSize() { return FILTER_WINDOW_SIZE; }
+
     /**
      * Update the localizer's factory, velocity, and acceleration estimates. This method should be
      * called regularly in a loop. If your localizer doesn't give velocity and/or acceleration, you
@@ -111,8 +112,45 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
         double dt = (currentTimeNs - prevTimeNs) / 1_000_000_000.0;
         if (dt <= 1e-6) { return; }
 
-        rawVelocity = pose.minus(prevPose).div(dt);
+        applyVelocityMeasurement(pose.minus(prevPose).div(dt), updateType, dt);
+        prevPose = pose;
+        prevTimeNs = currentTimeNs;
+    }
+
+    /**
+     * Filters a native velocity measurement and derives acceleration from the same filter state.
+     * Localizers with hardware-provided velocity should use this instead of assigning
+     * {@link #velocity} directly.
+     */
+    protected void calculate(Pose measuredVelocity) {
+        long currentTimeNs = System.nanoTime();
+        if (prevTimeNs == -1) {
+            rawVelocity = measuredVelocity;
+            rawAcceleration = Pose.zero();
+            applyFilterState(UpdateType.BOTH);
+            prevPose = pose;
+            prevRawVelocity = measuredVelocity;
+            prevTimeNs = currentTimeNs;
+            return;
+        }
+
+        double dt = (currentTimeNs - prevTimeNs) / 1_000_000_000.0;
+        if (dt <= 1e-6) { return; }
+
+        applyVelocityMeasurement(measuredVelocity, UpdateType.BOTH, dt);
+        prevPose = pose;
+        prevTimeNs = currentTimeNs;
+    }
+
+    private void applyVelocityMeasurement(Pose measuredVelocity, UpdateType updateType,
+                                          double dt) {
+        rawVelocity = measuredVelocity;
         rawAcceleration = rawVelocity.minus(prevRawVelocity).div(dt);
+        applyFilterState(updateType);
+        prevRawVelocity = rawVelocity;
+    }
+
+    private void applyFilterState(UpdateType updateType) {
 
         // Update sample size if using LowPass
         if (FILTER_WINDOW_SIZE != lastSize && !USE_KALMAN) {
@@ -149,9 +187,21 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
             );
         }
 
-        prevPose = pose;
-        prevRawVelocity = rawVelocity;
-        prevTimeNs = currentTimeNs;
+    }
+
+    /** Clears motion history after an odometry pose reset or simulator staging teleport. */
+    protected void resetKinematicEstimate(Pose newPose) {
+        pose = newPose;
+        velocity = Pose.zero();
+        rawVelocity = Pose.zero();
+        acceleration = Pose.zero();
+        rawAcceleration = Pose.zero();
+        prevPose = newPose;
+        prevRawVelocity = Pose.zero();
+        prevTimeNs = -1;
+        xFilter.reset();
+        yFilter.reset();
+        headingFilter.reset();
     }
 
     public void setIsTuning(boolean isTuning) {

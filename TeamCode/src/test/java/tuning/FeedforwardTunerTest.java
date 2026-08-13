@@ -56,20 +56,4 @@ public class FeedforwardTunerTest {
         assertTrue(!fit.isValid());
     }
 
-    @Test
-    public void timestampedVelocityDerivativeRejectsCadenceJitter() {
-        FeedforwardTuner.VelocityDerivative derivative =
-                new FeedforwardTuner.VelocityDerivative();
-        double time = 0.0;
-        double estimatedAcceleration = 0.0;
-
-        for (int i = 0; i < 80; i++) {
-            double dt = i % 3 == 0 ? 0.017 : i % 3 == 1 ? 0.021 : 0.024;
-            time += dt;
-            double velocity = 0.5 * 6.0 * time * time;
-            estimatedAcceleration = derivative.update(time, velocity);
-        }
-
-        assertEquals(6.0 * time, estimatedAcceleration, 0.7);
-    }
 }
