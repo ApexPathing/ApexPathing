@@ -130,29 +130,34 @@ public class CentripetalPhase extends TuningPhase {
 
     @Override
     protected boolean autoTuned() {
-        context.getTelemetry().addData("Current Pose", context.getFollower().getPose().toString());
-        context.getTelemetry().addData("Follower T", context.getFollower().getBestT());
-        context.getTelemetry().addData("Follower Cross Track Error", context.getFollower().getCrossTrackErrorIn());
-        context.getTelemetry().addData("Inward Centripetal Error",
-                context.getFollower().getCentripetalErrorIn());
-        context.getTelemetry().addData("Closest Path Point",
-                context.getFollower().getClosestPathPoint().toString());
-        context.getTelemetry().addData("Cross-Track Normal",
-                context.getFollower().getCrossTrackNormal().toString());
-        context.getTelemetry().addData("Inward Curve Normal",
-                context.getFollower().getPathNormal().toString());
-        context.getTelemetry().addData("Cross-Track Vector",
-                context.getFollower().getCrossTrackCorrection().toString());
-        context.getTelemetry().addData("Centripetal Vector",
-                context.getFollower().getCentripetalCorrection().toString());
-        context.getTelemetry().addData("Average Error", averageError);
-        context.getTelemetry().addData("Direction",
-                forwardPathRunning ? "OUTBOUND" : "RETURN");
-        context.getTelemetry().addData("Leg elapsed",
-                Math.round(legTimer.seconds() * 10.0) / 10.0 + " / " +
-                        LEG_TIMEOUT_SECONDS + " s");
-        context.getTelemetry().addData("Current Velocity",
-                context.getFollower().getVelocity().toString());
+        context.getTelemetry().addLine(forwardPathRunning
+                ? "Robot is following the outbound test arc."
+                : "Robot is following the return test arc.");
+        if (context.isDebugMode()) {
+            context.getTelemetry().addData("Current Pose", context.getFollower().getPose().toString());
+            context.getTelemetry().addData("Follower T", context.getFollower().getBestT());
+            context.getTelemetry().addData("Follower Cross Track Error", context.getFollower().getCrossTrackErrorIn());
+            context.getTelemetry().addData("Inward Centripetal Error",
+                    context.getFollower().getCentripetalErrorIn());
+            context.getTelemetry().addData("Closest Path Point",
+                    context.getFollower().getClosestPathPoint().toString());
+            context.getTelemetry().addData("Cross-Track Normal",
+                    context.getFollower().getCrossTrackNormal().toString());
+            context.getTelemetry().addData("Inward Curve Normal",
+                    context.getFollower().getPathNormal().toString());
+            context.getTelemetry().addData("Cross-Track Vector",
+                    context.getFollower().getCrossTrackCorrection().toString());
+            context.getTelemetry().addData("Centripetal Vector",
+                    context.getFollower().getCentripetalCorrection().toString());
+            context.getTelemetry().addData("Average Error", averageError);
+            context.getTelemetry().addData("Direction",
+                    forwardPathRunning ? "OUTBOUND" : "RETURN");
+            context.getTelemetry().addData("Leg elapsed",
+                    Math.round(legTimer.seconds() * 10.0) / 10.0 + " / " +
+                            LEG_TIMEOUT_SECONDS + " s");
+            context.getTelemetry().addData("Current Velocity",
+                    context.getFollower().getVelocity().toString());
+        }
         context.getTelemetry().update();
 
         if (!updateTrial()) {
@@ -196,6 +201,8 @@ public class CentripetalPhase extends TuningPhase {
     @Override
     protected void reportResults() {
         context.getTelemetry().addData("Centripetal Gain", context.constants.kCentripetal);
-        context.getTelemetry().addData("Mean signed error", averageError);
+        if (context.isDebugMode()) {
+            context.getTelemetry().addData("Mean signed error", averageError);
+        }
     }
 }

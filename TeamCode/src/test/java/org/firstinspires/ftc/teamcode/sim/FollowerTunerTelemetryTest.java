@@ -5,16 +5,20 @@ import static org.junit.Assert.assertTrue;
 
 import com.qualcomm.robotcore.eventloop.opmode.SimLinearOpModeBridge;
 import com.qualcomm.robotcore.hardware.Gamepad;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
 
 import org.firstinspires.ftc.teamcode.apexpathing.FollowerTuner;
 import org.codeblooded.ftcodesim.input.Keybinds;
 import org.codeblooded.ftcodesim.input.Keys;
+import org.codeblooded.ftcodesim.hardware.devices.SimMotor;
 import org.junit.Test;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import core.FollowerConstants;
 
 public class FollowerTunerTelemetryTest {
     @Test
@@ -50,6 +54,7 @@ public class FollowerTunerTelemetryTest {
 
     @Test
     public void respondsToSelectionAndStartInputs() throws Exception {
+        markAllPhasesCompleteForSelectionTest();
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         List<String> frames = new CopyOnWriteArrayList<>();
         ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
@@ -202,6 +207,11 @@ public class FollowerTunerTelemetryTest {
                     frames.stream().anyMatch(frame ->
                             frame.contains("Automatic heading tuning in progress"))
             );
+            assertTrue("Normal telemetry did not explain what the robot was doing",
+                    frames.stream().anyMatch(frame ->
+                            frame.contains("Robot is finding the minimum power needed to turn")));
+            assertFalse("Normal telemetry exposed debug-only search values",
+                    frames.stream().anyMatch(frame -> frame.contains("Static guess")));
         } finally {
             SimLinearOpModeBridge.stop(session);
         }
@@ -209,6 +219,7 @@ public class FollowerTunerTelemetryTest {
 
     @Test
     public void velocityFeedbackPhaseCanBeSelectedAndDisplayed() throws Exception {
+        markAllPhasesCompleteForSelectionTest();
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         List<String> frames = new CopyOnWriteArrayList<>();
         ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
@@ -249,6 +260,101 @@ public class FollowerTunerTelemetryTest {
         }
     }
 
+    @Test
+    public void debugEntryIsHiddenAndHoldCanEnableAndDisableIt() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        List<String> frames = new CopyOnWriteArrayList<>();
+        ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
+        telemetry.setMsTransmissionInterval(0);
+
+        FollowerTuner tuner = new FollowerTuner();
+        tuner.hardwareMap = hardware.hardwareMap;
+        tuner.telemetry = telemetry;
+        tuner.gamepad1 = new Gamepad();
+        tuner.gamepad2 = new Gamepad();
+
+        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(tuner, () -> { });
+        try {
+            pump(session, tuner, telemetry, 100);
+            assertFalse("Normal menu revealed the hidden debug entry control",
+                    frames.stream().anyMatch(frame -> frame.contains("Hold Left Stick Button")));
+
+            tuner.gamepad1.left_stick_button = true;
+            pump(session, tuner, telemetry, 1650);
+            assertTrue("Holding the hidden menu control did not enable debug mode",
+                    frames.stream().anyMatch(frame -> frame.contains("DEBUG MODE")));
+            assertTrue("Debug mode did not explain how to exit",
+                    frames.stream().anyMatch(frame ->
+                            frame.contains("Hold Right Stick Button") &&
+                                    frame.contains("exit debug mode")));
+
+            tuner.gamepad1.left_stick_button = false;
+            pump(session, tuner, telemetry, 50);
+            int exitFrameStart = frames.size();
+            tuner.gamepad1.right_stick_button = true;
+            pump(session, tuner, telemetry, 1650);
+            tuner.gamepad1.right_stick_button = false;
+            pump(session, tuner, telemetry, 50);
+
+            assertTrue("Holding the displayed exit control did not disable debug mode",
+                    frames.subList(Math.min(exitFrameStart, frames.size()), frames.size()).stream()
+                            .anyMatch(frame -> frame.contains("E-STOP") &&
+                                    !frame.contains("DEBUG MODE")));
+        } finally {
+            SimLinearOpModeBridge.stop(session);
+        }
+    }
+
+    @Test
+    public void backButtonEmergencyStopsFromAnActiveTunerScreen() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        List<String> frames = new CopyOnWriteArrayList<>();
+        ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
+        telemetry.setMsTransmissionInterval(0);
+
+        FollowerTuner tuner = new FollowerTuner();
+        tuner.hardwareMap = hardware.hardwareMap;
+        tuner.telemetry = telemetry;
+        tuner.gamepad1 = new Gamepad();
+        tuner.gamepad2 = new Gamepad();
+        AtomicBoolean stopRequested = new AtomicBoolean();
+
+        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(
+                tuner, () -> stopRequested.set(true));
+        try {
+            pump(session, tuner, telemetry, 100);
+            tuner.gamepad1.b = true;
+            pump(session, tuner, telemetry, 30);
+            tuner.gamepad1.b = false;
+            SimLinearOpModeBridge.start(session);
+            pump(session, tuner, telemetry, 100);
+
+            tuner.gamepad1.a = true;
+            pump(session, tuner, telemetry, 30);
+            tuner.gamepad1.a = false;
+            long motionDeadline = System.nanoTime() + 1_000_000_000L;
+            while (!anyDriveMotorPowered(hardware) && System.nanoTime() < motionDeadline) {
+                pump(session, tuner, telemetry, 20);
+            }
+            assertTrue("Test did not reach an actively powered tuner state",
+                    anyDriveMotorPowered(hardware));
+
+            tuner.gamepad1.back = true;
+            pump(session, tuner, telemetry, 50);
+            tuner.gamepad1.back = false;
+            pump(session, tuner, telemetry, 50);
+
+            assertTrue("Back did not request an immediate OpMode stop", stopRequested.get());
+            assertTrue("Emergency-stop confirmation was not shown",
+                    frames.stream().anyMatch(frame ->
+                            frame.contains("EMERGENCY STOP ACTIVATED")));
+            assertFalse("Emergency stop left drivetrain power active",
+                    anyDriveMotorPowered(hardware));
+        } finally {
+            SimLinearOpModeBridge.stop(session);
+        }
+    }
+
     private static void pump(
             SimLinearOpModeBridge.Session session,
             FollowerTuner tuner,
@@ -265,6 +371,27 @@ public class FollowerTunerTelemetryTest {
             telemetry.update();
             Thread.sleep(5);
         }
+    }
+
+    private static void markAllPhasesCompleteForSelectionTest() {
+        FollowerConstants constants = FollowerConstants.getInstance();
+        constants.angularCoeffs.kP = 1.0;
+        constants.angularKA = 1.0;
+        constants.translationalCoeffs.kP = 1.0;
+        constants.angularKV = 1.0;
+        constants.translationalKV = 1.0;
+        constants.translationalKA = 1.0;
+        constants.kCentripetal = 1.0;
+        constants.velocityFeedbackGain = 1.0;
+        constants.angularVelocityFeedbackGain = 1.0;
+    }
+
+    private static boolean anyDriveMotorPowered(ApexSimulation.Hardware hardware) {
+        for (String name : hardware.drivetrain.motorNames) {
+            SimMotor motor = (SimMotor) hardware.hardwareMap.get(DcMotorEx.class, name);
+            if (Math.abs(motor.getPower()) > 1e-9) { return true; }
+        }
+        return false;
     }
 
 }

@@ -36,6 +36,11 @@ public abstract class TuningPhase {
         TuningState state = TuningState.SELECT_MODE;
 
         while (opMode.opModeIsActive()) {
+            context.updateDebugMode(false);
+            if (context.checkEmergencyStop()) { return false; }
+            context.getTelemetry().clearAll();
+            context.addInterfaceHeader();
+
             switch (state) {
                 case SELECT_MODE:
                     showModeSelector();
@@ -115,6 +120,7 @@ public abstract class TuningPhase {
             case "B": return "B [left-bracket key]";
             case "X": return "X [P key]";
             case "Y": return "Y [- key]";
+            case "BACK": return "Back [Tab key]";
             default: return button;
         }
     }

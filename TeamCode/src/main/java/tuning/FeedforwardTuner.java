@@ -594,15 +594,31 @@ public class FeedforwardTuner extends TuningPhase {
             }
         }
 
-        context.getTelemetry().addData("Characterization", (autoRunIndex + 1) +
-                " / " + AUTO_RUNS.length);
-        context.getTelemetry().addData("Test", run.axis + " " + run.excitation);
-        context.getTelemetry().addData("Direction", run.forward ? "FORWARD / CCW" : "BACKWARD / CW");
-        context.getTelemetry().addData("Angular samples", angularObservations.size());
-        context.getTelemetry().addData("Translation samples", translationalObservations.size());
-        context.getTelemetry().addData("CSV", csvPath);
+        context.getTelemetry().addLine(feedforwardActionDescription(run));
+        if (context.isDebugMode()) {
+            context.getTelemetry().addData("Characterization", (autoRunIndex + 1) +
+                    " / " + AUTO_RUNS.length);
+            context.getTelemetry().addData("Test", run.axis + " " + run.excitation);
+            context.getTelemetry().addData("Direction", run.forward ? "FORWARD / CCW" : "BACKWARD / CW");
+            context.getTelemetry().addData("Angular samples", angularObservations.size());
+            context.getTelemetry().addData("Translation samples", translationalObservations.size());
+            context.getTelemetry().addData("CSV", csvPath);
+        }
         context.getTelemetry().update();
         return false;
+    }
+
+    private String feedforwardActionDescription(AutoRun run) {
+        if (autoStage == AutoStage.SETTLING) {
+            return "Robot is stopping before the next feedforward run.";
+        }
+        String motion;
+        if (run.axis == Axis.ANGULAR) {
+            motion = run.forward ? "turning counterclockwise" : "turning clockwise";
+        } else {
+            motion = run.forward ? "driving forward" : "driving backward";
+        }
+        return "Robot is " + motion + " for the feedforward test.";
     }
 
     private void writeCharacterizationCsv() {
@@ -646,6 +662,7 @@ public class FeedforwardTuner extends TuningPhase {
         context.getTelemetry().addData("Translational KV", context.constants.translationalKV);
         context.getTelemetry().addData("Translational KA", context.constants.translationalKA);
         context.getTelemetry().addData("Validation", validationMessage);
+        if (!context.isDebugMode()) { return; }
         context.getTelemetry().addData("Characterization CSV", csvPath);
         if (csvError != null) {
             context.getTelemetry().addData("CSV warning", csvError);

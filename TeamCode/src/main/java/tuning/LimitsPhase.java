@@ -362,11 +362,22 @@ public class LimitsPhase extends TuningPhase {
         }
 
         String step = trial >= TRIALS.length ? "Calculating" : TRIALS[trial].name();
-        context.getTelemetry().addData("Step", step);
+        if (stage == LimitStage.SETTLING) {
+            context.getTelemetry().addLine("Robot is stopping before the next limits run.");
+        } else if (stage == LimitStage.RUNNING) {
+            context.getTelemetry().addLine("Robot is running the " + step + " limits test.");
+        } else {
+            context.getTelemetry().addLine("Preparing the next limits run.");
+        }
+        if (context.isDebugMode()) {
+            context.getTelemetry().addData("Step", step);
+        }
         if (stage == LimitStage.RUNNING) {
-            context.getTelemetry().addData("Stop detection",
-                    stableWindows + " / " + REQUIRED_STABLE_WINDOWS + " stable windows");
-            context.getTelemetry().addData("Travel", travelled);
+            if (context.isDebugMode()) {
+                context.getTelemetry().addData("Stop detection",
+                        stableWindows + " / " + REQUIRED_STABLE_WINDOWS + " stable windows");
+                context.getTelemetry().addData("Travel", travelled);
+            }
         }
         context.getTelemetry().update();
         return false;

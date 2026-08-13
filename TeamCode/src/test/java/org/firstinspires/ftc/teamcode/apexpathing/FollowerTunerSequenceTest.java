@@ -32,4 +32,26 @@ public class FollowerTunerSequenceTest {
         assertFalse(FollowerTuner.velocityFeedbackTuned(0.10, 0.0));
         assertTrue(FollowerTuner.velocityFeedbackTuned(0.10, 0.25));
     }
+
+    @Test
+    public void phaseSelectionRequiresEveryPriorPhaseButAllowsRetuning() {
+        FollowerTuner.Phase[] phases = FollowerTuner.Phase.values();
+        boolean[] original = new boolean[phases.length];
+        for (int i = 0; i < phases.length; i++) {
+            original[i] = phases[i].tuned;
+            phases[i].tuned = false;
+        }
+
+        try {
+            assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.HEADING));
+            assertFalse(FollowerTuner.phaseAvailable(FollowerTuner.Phase.LIMITS));
+
+            FollowerTuner.Phase.HEADING.tuned = true;
+            assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.HEADING));
+            assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.LIMITS));
+            assertFalse(FollowerTuner.phaseAvailable(FollowerTuner.Phase.DRIVE));
+        } finally {
+            for (int i = 0; i < phases.length; i++) { phases[i].tuned = original[i]; }
+        }
+    }
 }

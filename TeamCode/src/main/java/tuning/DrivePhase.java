@@ -136,7 +136,7 @@ public class DrivePhase extends TuningPhase {
         context.getTelemetry().addData("Drive P", context.constants.translationalCoeffs.kP);
         context.getTelemetry().addData("Drive D", context.constants.translationalCoeffs.kD);
         context.getTelemetry().addData("Drive S", context.constants.translationalCoeffs.kS);
-        if (!manualMode) {
+        if (!manualMode && context.isDebugMode()) {
             context.getTelemetry().addData("Automatic validation",
                     routine.getValidationSummary());
             context.getTelemetry().addData("PDS response CSV", routine.getCsvPath());

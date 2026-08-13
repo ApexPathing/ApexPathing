@@ -140,7 +140,7 @@ public class HeadingPhase extends TuningPhase {
         context.getTelemetry().addData("Heading P", context.constants.angularCoeffs.kP);
         context.getTelemetry().addData("Heading D", context.constants.angularCoeffs.kD);
         context.getTelemetry().addData("Heading S", context.constants.angularCoeffs.kS);
-        if (!manualMode) {
+        if (!manualMode && context.isDebugMode()) {
             context.getTelemetry().addData("Automatic validation",
                     routine.getValidationSummary());
             context.getTelemetry().addData("PDS response CSV", routine.getCsvPath());

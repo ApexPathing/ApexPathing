@@ -292,6 +292,11 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     private void reportAutomaticProgress() {
         context.getTelemetry().addLine("Automatic velocity feedback tuning in progress");
+        context.getTelemetry().addLine(actionDescription());
+        if (!context.isDebugMode()) {
+            context.getTelemetry().update();
+            return;
+        }
         context.getTelemetry().addData("Axis", axis);
         context.getTelemetry().addData("Search round", (round + 1) + " / " + SEARCH_ROUNDS);
         context.getTelemetry().addData("Candidate", (candidate + 1) + " / " + gains.length);
@@ -307,6 +312,17 @@ public class VelocityFeedbackPhase extends TuningPhase {
         context.getTelemetry().addData("Usable samples", errorSamples);
         context.getTelemetry().addData("Last RMS score", lastScore);
         context.getTelemetry().update();
+    }
+
+    private String actionDescription() {
+        if (axis == FeedbackAxis.TRANSLATION) {
+            return forwardIsRunning
+                    ? "Robot is driving the outbound test path."
+                    : "Robot is driving the return test path.";
+        }
+        return forwardIsRunning
+                ? "Robot is turning to the outbound heading."
+                : "Robot is turning back to the starting heading.";
     }
 
     @Override
@@ -361,10 +377,12 @@ public class VelocityFeedbackPhase extends TuningPhase {
     protected void reportResults() {
         context.getTelemetry().addData("Translation feedback gain",
                 context.constants.velocityFeedbackGain);
-        context.getTelemetry().addData("Translation root mean square error", translationScore);
         context.getTelemetry().addData("Angular feedback gain",
                 context.constants.angularVelocityFeedbackGain);
-        context.getTelemetry().addData("Angular root mean square error", angularScore);
+        if (context.isDebugMode()) {
+            context.getTelemetry().addData("Translation root mean square error", translationScore);
+            context.getTelemetry().addData("Angular root mean square error", angularScore);
+        }
     }
 
     static boolean isUsableTranslationSample(double targetVelocity, double traveled,

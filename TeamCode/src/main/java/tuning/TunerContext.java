@@ -23,9 +23,15 @@ import geometry.Pose;
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
 public class TunerContext {
+    private static final long DEBUG_HOLD_NANOS = 1_500_000_000L;
+
     private final LinearOpMode opMode;
     private Follower follower;
     public FollowerConstants constants;
+    private boolean debugMode;
+    private boolean debugHoldHandled;
+    private long debugHoldStartedNanos;
+    private boolean emergencyStopped;
 
     public TunerContext(LinearOpMode opMode) { this.opMode = opMode; }
 
@@ -37,6 +43,59 @@ public class TunerContext {
     public Follower getFollower() { return follower; }
 
     public Telemetry getTelemetry() { return opMode.telemetry; }
+
+    public boolean isDebugMode() { return debugMode; }
+
+    public boolean isEmergencyStopped() { return emergencyStopped; }
+
+    /** Debug can be enabled only from the phase menu, but may be disabled from any screen. */
+    public void updateDebugMode(boolean allowEnable) {
+        boolean held = debugMode
+                ? opMode.gamepad1.right_stick_button
+                : allowEnable && opMode.gamepad1.left_stick_button;
+        if (!held) {
+            debugHoldStartedNanos = 0L;
+            debugHoldHandled = false;
+            return;
+        }
+
+        if (debugHoldHandled || (!allowEnable && !debugMode)) { return; }
+        if (debugHoldStartedNanos == 0L) {
+            debugHoldStartedNanos = System.nanoTime();
+            return;
+        }
+        if (System.nanoTime() - debugHoldStartedNanos >= DEBUG_HOLD_NANOS) {
+            debugMode = !debugMode;
+            debugHoldHandled = true;
+        }
+    }
+
+    /** Stops all drivetrain output and terminates the tuner when Back is pressed. */
+    public boolean checkEmergencyStop() {
+        if (emergencyStopped) { return true; }
+        if (!opMode.gamepad1.backWasPressed()) { return false; }
+
+        emergencyStopped = true;
+        if (follower != null) { follower.stop(); }
+        getTelemetry().clearAll();
+        getTelemetry().addLine("EMERGENCY STOP ACTIVATED");
+        getTelemetry().addLine("All drivetrain output has been stopped.");
+        getTelemetry().update();
+        opMode.requestOpModeStop();
+        return true;
+    }
+
+    /** Adds controls which must remain visible independently of the current phase. */
+    public void addInterfaceHeader() {
+        boolean simulation = Boolean.getBoolean("apex.simulation.unlockTunerPhases");
+        getTelemetry().addLine("E-STOP: Back button" + (simulation ? " [Tab key]" : ""));
+        if (debugMode) {
+            getTelemetry().addLine("DEBUG MODE");
+            getTelemetry().addLine("Hold Right Stick Button" +
+                    (simulation ? " [comma key]" : "") + " to exit debug mode.");
+        }
+        getTelemetry().addLine();
+    }
 
     /** Teleports only FTCodeSim; real hardware must still be positioned by its operator. */
     public void positionRobotForSimulation(Pose pose) {

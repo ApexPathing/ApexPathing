@@ -358,6 +358,11 @@ public class PDSRoutine {
     void reportProgress(TunerContext context) {
         context.getTelemetry().addLine("Automatic " + axis.toString().toLowerCase() +
                 " tuning in progress");
+        context.getTelemetry().addLine(actionDescription());
+        if (!context.isDebugMode()) {
+            context.getTelemetry().update();
+            return;
+        }
         context.getTelemetry().addData("Step", state.toString().replace('_', ' '));
         context.getTelemetry().addData("Static guess", search.getGuess());
         if (relay != null) {
@@ -387,6 +392,29 @@ public class PDSRoutine {
         context.getTelemetry().addData("CSV", getCsvPath());
         context.getTelemetry().addLine("Keep the OpMode running until results appear.");
         context.getTelemetry().update();
+    }
+
+    private String actionDescription() {
+        switch (state) {
+            case TUNING_KS:
+                return axis == Axis.HEADING
+                        ? "Robot is finding the minimum power needed to turn."
+                        : "Robot is finding the minimum power needed to move.";
+            case SETTLING_BETWEEN_KS:
+            case SETTLING_FOR_RELAY:
+            case SETTLING_FOR_VALIDATION:
+                return "Robot is stopping before the next test.";
+            case TUNING_RELAY:
+                return axis == Axis.HEADING
+                        ? "Robot is turning back and forth to identify its response."
+                        : "Robot is driving back and forth to identify its response.";
+            case VALIDATING_PD:
+                return axis == Axis.HEADING
+                        ? "Robot is turning to a target to validate the controller."
+                        : "Robot is moving to a target to validate the controller.";
+            default:
+                return "Robot is running the controller test.";
+        }
     }
 
     PDSCoefficients getCoefficients() { return controller.getCoefficients(); }

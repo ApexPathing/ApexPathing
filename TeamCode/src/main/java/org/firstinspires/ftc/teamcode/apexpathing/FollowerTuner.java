@@ -81,20 +81,30 @@ public class FollowerTuner extends LinearOpMode {
         for (Phase phase : phases) { phase.updateTunedStatus(context.constants); }
         selectFirstIncompletePhase();
 
-        while (opModeInInit() && !isPhaseSelected) { isPhaseSelected = phaseSelector(); }
+        while (opModeInInit() && !isPhaseSelected) {
+            context.updateDebugMode(true);
+            if (context.checkEmergencyStop()) { return; }
+            isPhaseSelected = phaseSelector();
+            sleep(20);
+        }
 
-        if (isPhaseSelected) {
+        while (opModeInInit() && isPhaseSelected) {
+            context.updateDebugMode(false);
+            if (context.checkEmergencyStop()) { return; }
+            telemetry.clearAll();
+            context.addInterfaceHeader();
             telemetry.addLine("Press Start to run the tuner.");
             telemetry.addLine("Make sure the robot has enough space.");
             telemetry.update();
+            sleep(20);
         }
-
-        waitForStart();
 
         // Starting the OpMode must never silently accept a highlighted option. If Start was
         // pressed before a phase was selected, keep presenting the same menu while RUNNING until
         // the user explicitly confirms a phase.
         while (opModeIsActive() && !isPhaseSelected) {
+            context.updateDebugMode(true);
+            if (context.checkEmergencyStop()) { return; }
             isPhaseSelected = phaseSelector();
             sleep(20);
         }
@@ -121,6 +131,8 @@ public class FollowerTuner extends LinearOpMode {
                 context.getFollower().setPose(Pose.zero());
                 selectedPhaseOrdinal = nextPhase;
                 selectPhase();
+            } else if (context.isEmergencyStopped()) {
+                break;
             }
         }
 
@@ -128,9 +140,7 @@ public class FollowerTuner extends LinearOpMode {
     }
 
     /** Loops through phases before the given phase to check if they have been tuned or not. */
-    private boolean phaseAvailable(Phase phase) {
-        if (Boolean.getBoolean(UNLOCK_PHASES_PROPERTY)) { return true; }
-
+    static boolean phaseAvailable(Phase phase) {
         for (int i = 0; i < phase.ordinal(); i++) {
             if (!phases[i].tuned) {
                 return false;
@@ -140,8 +150,8 @@ public class FollowerTuner extends LinearOpMode {
     }
 
     private String phaseStatus(Phase phase) {
-        if (phase.tuned) { return "[ ✓ ]"; }
-        return phaseAvailable(phase) ? "[   ]" : "[ X ]";
+        if (phase.tuned) { return "[DONE]"; }
+        return phaseAvailable(phase) ? "[READY]" : "[LOCKED]";
     }
 
     private void selectFirstIncompletePhase() {
@@ -158,8 +168,13 @@ public class FollowerTuner extends LinearOpMode {
         String selectControl = Boolean.getBoolean(UNLOCK_PHASES_PROPERTY)
                 ? "B [left-bracket key]"
                 : "B";
+        telemetry.clearAll();
+        context.addInterfaceHeader();
+        telemetry.addLine("Select a tuning phase");
         telemetry.addLine("Use Dpad Up and Down to choose a phase, then press " +
                 selectControl + " to select it.");
+        telemetry.addLine("Completed phases can be selected again for retuning.");
+        telemetry.addLine("Locked phases require every previous phase to be complete.");
         telemetry.addLine();
 
         for (int i = 0; i < phaseAmount; i++) {
@@ -178,7 +193,7 @@ public class FollowerTuner extends LinearOpMode {
             do {
                 selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() + 1) % phaseAmount];
             } while (!phaseAvailable(selectedPhaseOrdinal));
-        } else if (gamepad1.bWasPressed()) {
+        } else if (gamepad1.bWasPressed() && phaseAvailable(selectedPhaseOrdinal)) {
             selectPhase();
             return true;
         }
@@ -194,6 +209,7 @@ public class FollowerTuner extends LinearOpMode {
             // Do not let a rate-limited RESULTS frame from the previous phase obscure the next
             // phase's selector in FTCodeSim's Driver Station.
             telemetry.clearAll();
+            context.addInterfaceHeader();
             telemetry.addLine("Next phase: " + phaseDisplayName(selectedPhaseOrdinal));
             telemetry.addLine("Choose automatic/manual mode, then press " +
                     (Boolean.getBoolean(UNLOCK_PHASES_PROPERTY) ? "A [; key]" : "A") + ".");
@@ -224,6 +240,7 @@ public class FollowerTuner extends LinearOpMode {
 
     private void finishTuningWorkflow() {
         telemetry.clearAll();
+        context.addInterfaceHeader();
         telemetry.addLine("All follower tuning phases are complete.");
 
         // FTCodeSim does not move its Driver Station out of RUNNING when a LinearOpMode calls
@@ -231,7 +248,11 @@ public class FollowerTuner extends LinearOpMode {
         if (Boolean.getBoolean(UNLOCK_PHASES_PROPERTY)) {
             telemetry.addLine("Press the red STOP button to finish this simulation.");
             telemetry.update();
-            while (opModeIsActive()) { sleep(50); }
+            while (opModeIsActive()) {
+                context.updateDebugMode(false);
+                if (context.checkEmergencyStop()) { return; }
+                sleep(50);
+            }
             return;
         }
 
