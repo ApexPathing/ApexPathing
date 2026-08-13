@@ -112,18 +112,7 @@ public abstract class TuningPhase {
     }
 
     /** Shows the stock FTCodeSim key without changing the real gamepad control. */
-    protected String control(String button) {
-        if (!Boolean.getBoolean("apex.simulation.unlockTunerPhases")) { return button; }
-
-        switch (button) {
-            case "A": return "A [; key]";
-            case "B": return "B [left-bracket key]";
-            case "X": return "X [P key]";
-            case "Y": return "Y [- key]";
-            case "BACK": return "Back [Tab key]";
-            default: return button;
-        }
-    }
+    protected String control(String button) { return context.control(button); }
 
     /**
      * Places a simulated movement test at its phase-specific staging pose. On hardware, resetting

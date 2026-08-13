@@ -219,7 +219,7 @@ public class FollowerTunerTelemetryTest {
     }
 
     @Test(timeout = 60_000L)
-    public void automaticHeadingIdentificationPassesPointToPointValidation() throws Exception {
+    public void automaticHeadingIdentificationWaitsForAlternatingOperatorTests() throws Exception {
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         List<String> frames = new CopyOnWriteArrayList<>();
         ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
@@ -253,14 +253,59 @@ public class FollowerTunerTelemetryTest {
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);
             tuner.gamepad1.a = false;
 
-            long resultDeadline = System.nanoTime() + 45_000_000_000L;
-            while (!latestFrameContains(frames,
-                    "Heading Controller phase complete with results") &&
-                    System.nanoTime() < resultDeadline) {
+            long checkDeadline = System.nanoTime() + 45_000_000_000L;
+            while (!latestFrameContains(frames, "Ready for operator check") &&
+                    System.nanoTime() < checkDeadline) {
                 pumpWithPhysics(session, tuner, telemetry, hardware, 20);
             }
+            assertTrue("Automatic heading identification did not reach the operator check. " +
+                            "Latest telemetry:\n" + latestFrame(frames),
+                    latestFrameContains(frames, "Ready for operator check"));
 
-            assertTrue("Automatic heading validation did not finish successfully. Latest " +
+            pumpWithPhysics(session, tuner, telemetry, hardware, 250);
+            assertFalse("Robot moved before the operator requested a response test",
+                    anyDriveMotorPowered(hardware));
+
+            tuner.gamepad1.x = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.x = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            assertTrue("X did not start the first operator-requested test",
+                    latestFrameContains(frames, "turning to the requested test target"));
+
+            long firstTestDeadline = System.nanoTime() + 6_000_000_000L;
+            while (!latestFrameContains(frames, "Test complete") &&
+                    System.nanoTime() < firstTestDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
+            assertTrue("First operator-requested heading test did not complete",
+                    latestFrameContains(frames, "Test complete"));
+            assertTrue("First heading test did not use the positive target",
+                    hardware.drivetrain.position.theta > 0.0);
+
+            tuner.gamepad1.x = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.x = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            assertTrue("X did not start the alternating return test",
+                    latestFrameContains(frames, "turning to the requested test target"));
+
+            long secondTestDeadline = System.nanoTime() + 6_000_000_000L;
+            while (!latestFrameContains(frames, "Test complete") &&
+                    System.nanoTime() < secondTestDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
+            assertTrue("Alternating heading test did not complete",
+                    latestFrameContains(frames, "Test complete"));
+            assertTrue("Second heading test did not alternate to the negative target",
+                    hardware.drivetrain.position.theta < 0.0);
+
+            tuner.gamepad1.a = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.a = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+
+            assertTrue("A did not accept the operator-checked gains. Latest " +
                             "telemetry:\n" + latestFrame(frames),
                     latestFrameContains(frames,
                             "Heading Controller phase complete with results"));

@@ -51,7 +51,8 @@ public class DrivePhase extends TuningPhase {
         context.getTelemetry().addLine(
                 "Place the robot with at least 24 inches clear in front and behind it.");
         context.getTelemetry().addLine(
-                "The automatic test oscillates around its start, then moves to a nearby target.");
+                "Automatic identification oscillates around its start. Response checks move only " +
+                        "when requested afterward.");
     }
 
     @Override
@@ -137,8 +138,8 @@ public class DrivePhase extends TuningPhase {
         context.getTelemetry().addData("Drive D", context.constants.translationalCoeffs.kD);
         context.getTelemetry().addData("Drive S", context.constants.translationalCoeffs.kS);
         if (!manualMode && context.isDebugMode()) {
-            context.getTelemetry().addData("Automatic validation",
-                    routine.getValidationSummary());
+            context.getTelemetry().addData("Operator check",
+                    routine.getOperatorCheckSummary());
             context.getTelemetry().addData("PDS response CSV", routine.getCsvPath());
         }
     }

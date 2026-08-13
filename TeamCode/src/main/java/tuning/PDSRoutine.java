@@ -10,7 +10,8 @@ import geometry.Pose;
 /**
  * Tunes static friction and PD position gains. Static friction is found with a bounded search;
  * PD gains come from a repeatable relay-feedback limit cycle and the Ziegler-Nichols PD rule.
- * A final point-to-point response is logged and checked before the phase reports completion.
+ * The identified gains can then be checked with operator-triggered alternating point-to-point
+ * moves before the operator accepts them.
  */
 public class PDSRoutine {
     enum Axis {
@@ -24,8 +25,8 @@ public class PDSRoutine {
         SETTLING_BETWEEN_KS,
         SETTLING_FOR_RELAY,
         TUNING_RELAY,
-        SETTLING_FOR_VALIDATION,
-        VALIDATING_PD
+        SETTLING_FOR_OPERATOR_CHECK,
+        OPERATOR_CHECK
     }
 
     private static final double MOVEMENT_THRESHOLD = 0.05;
@@ -35,35 +36,34 @@ public class PDSRoutine {
     private static final double RELAY_MIN_TIMEOUT_SECONDS = 16.0;
     private static final double RELAY_MAX_TIMEOUT_SECONDS = 60.0;
     private static final double MAX_RELAY_SAMPLE_GAP_SECONDS = 0.100;
-    private static final double VALIDATION_TIMEOUT_SECONDS = 4.0;
-    private static final double VALIDATION_SETTLED_SECONDS = 0.50;
-    private static final double MAX_VALIDATION_POWER = 0.75;
-    private static final double VALIDATION_BREAKAWAY_RESERVE = 0.02;
+    private static final double TEST_TIMEOUT_SECONDS = 4.0;
+    private static final double TEST_SETTLED_SECONDS = 0.50;
+    private static final double MAX_TEST_POWER = 0.75;
+    private static final double TEST_BREAKAWAY_RESERVE = 0.02;
 
     private final Axis axis;
     private final ElapsedTime timer = new ElapsedTime();
     private final ElapsedTime sessionTimer = new ElapsedTime();
     private final PDSController controller;
-    private final BinarySearch search;
+    private BinarySearch search;
     private final double threshold;
 
     private PDSState state = PDSState.TUNING_KS;
     private double startValue;
     private RelayOscillationAnalyzer relay;
     private RelayOscillationAnalyzer.Estimate relayEstimate;
-    private double validationTarget;
-    private double validationMaxPosition;
-    private double validationSettledSince = -1.0;
-    private double validationFinalError = Double.NaN;
-    private double validationOvershoot = Double.NaN;
-    private boolean validationPassed;
-    private String validationSummary = "Not run";
+    private double testTarget;
+    private double nextTestTarget;
+    private double testSettledSince = -1.0;
+    private double testFinalError = Double.NaN;
+    private boolean testActive;
+    private int completedTestCount;
+    private String operatorCheckSummary = "Not started";
     private TuningCsvWriter csv;
     private double relayDeadlineSeconds = RELAY_MIN_TIMEOUT_SECONDS;
     private double lastRelaySampleSeconds = Double.NaN;
 
     PDSRoutine(TunerContext context, Axis axis) {
-        search = new BinarySearch(0.0, 0.4, 0.01);
         this.axis = axis;
         controller = new PDSController(new PDSCoefficients());
         if (axis == Axis.HEADING) { controller.setAngularController(); }
@@ -71,6 +71,8 @@ public class PDSRoutine {
     }
 
     void start(TunerContext context) {
+        if (csv != null) { csv.close(); }
+        search = new BinarySearch(0.0, 0.4, 0.01);
         context.getFollower().disableControllers();
         resetAxisPose(context);
         timer.reset();
@@ -81,8 +83,9 @@ public class PDSRoutine {
         state = PDSState.TUNING_KS;
         relay = null;
         relayEstimate = null;
-        validationSummary = "Pending relay identification";
-        validationPassed = false;
+        testActive = false;
+        completedTestCount = 0;
+        operatorCheckSummary = "Pending relay identification";
         csv = TuningCsvWriter.open(
                 "pds_" + axis.toString().toLowerCase(),
                 "time_s", "axis", "state", "target", "position", "error",
@@ -105,7 +108,7 @@ public class PDSRoutine {
         startValue = getValue(stagingPose);
     }
 
-    /** PDS relay and validation motion are bidirectional, so every axis starts at field center. */
+    /** PDS relay and operator-requested test motion are bidirectional, so start at field center. */
     static Pose stagingPoseFor(Axis ignored) { return Pose.zero(); }
 
     private void move(TunerContext context, double power) {
@@ -156,11 +159,11 @@ public class PDSRoutine {
                 return false;
             case TUNING_RELAY:
                 return updateRelay(context);
-            case SETTLING_FOR_VALIDATION:
-                if (settle(context, PDSState.VALIDATING_PD)) { beginValidation(context); }
+            case SETTLING_FOR_OPERATOR_CHECK:
+                if (settle(context, PDSState.OPERATOR_CHECK)) { beginOperatorCheck(context); }
                 return false;
-            case VALIDATING_PD:
-                return updateValidation(context);
+            case OPERATOR_CHECK:
+                return updateOperatorCheck(context);
             default:
                 return false;
         }
@@ -202,7 +205,7 @@ public class PDSRoutine {
         relay = new RelayOscillationAnalyzer(relayPower, hysteresis);
         relayDeadlineSeconds = RELAY_MIN_TIMEOUT_SECONDS;
         lastRelaySampleSeconds = Double.NaN;
-        validationSummary = "Collecting repeatable relay cycles";
+        operatorCheckSummary = "Collecting repeatable relay cycles";
     }
 
     /**
@@ -262,85 +265,103 @@ public class PDSRoutine {
         controller.getCoefficients().setkP(pd.kP);
         controller.getCoefficients().setkD(pd.kD);
         context.getFollower().stop();
-        state = PDSState.SETTLING_FOR_VALIDATION;
+        state = PDSState.SETTLING_FOR_OPERATOR_CHECK;
         timer.reset();
-        validationSummary = "Relay fit complete; validating point-to-point response";
+        operatorCheckSummary = "Relay fit complete; waiting for operator check";
         return false;
     }
 
-    private void beginValidation(TunerContext context) {
-        validationTarget = axis == Axis.HEADING ? Math.toRadians(30.0) : 8.0;
-        validationMaxPosition = 0.0;
-        validationSettledSince = -1.0;
-        validationFinalError = validationTarget;
-        validationOvershoot = 0.0;
+    private void beginOperatorCheck(TunerContext context) {
+        nextTestTarget = axis == Axis.HEADING ? Math.toRadians(30.0) : 8.0;
+        testTarget = 0.0;
+        testSettledSince = -1.0;
+        testFinalError = Double.NaN;
+        testActive = false;
+        operatorCheckSummary = "Ready for operator check";
         controller.reset();
     }
 
-    private boolean updateValidation(TunerContext context) {
+    private boolean updateOperatorCheck(TunerContext context) {
+        if (!testActive) {
+            context.getFollower().stop();
+            logSample(context, testTarget, getRelativePosition(context), 0.0);
+
+            if (context.testButtonWasPressed()) {
+                testTarget = nextTestTarget;
+                nextTestTarget = -nextTestTarget;
+                testSettledSince = -1.0;
+                testFinalError = testTarget - getRelativePosition(context);
+                testActive = true;
+                timer.reset();
+                controller.reset();
+                operatorCheckSummary = "Running operator-requested test";
+                return false;
+            }
+            if (context.retuneButtonWasPressed()) {
+                start(context);
+                return false;
+            }
+            if (context.acceptButtonWasPressed()) {
+                operatorCheckSummary = "Gains accepted by operator";
+                if (csv != null) { csv.close(); }
+                return true;
+            }
+            return false;
+        }
+
         double elapsed = timer.seconds();
         double position = getRelativePosition(context);
         double velocity = getAxisVelocity(context);
-        double error = validationTarget - position;
+        double error = testTarget - position;
         double errorTolerance = axis == Axis.HEADING ? Math.toRadians(2.5) : 0.75;
         double velocityTolerance = axis == Axis.HEADING ? 0.10 : 1.0;
-        double command = ensureValidationBreakawayPower(
+        double command = ensureTestBreakawayPower(
                 controller.calculate(error), error, velocity,
                 controller.getCoefficients().kS, errorTolerance, velocityTolerance);
-        command = Range.clip(command, -MAX_VALIDATION_POWER, MAX_VALIDATION_POWER);
+        command = Range.clip(command, -MAX_TEST_POWER, MAX_TEST_POWER);
 
         double safetyLimit = axis == Axis.HEADING ? Math.toRadians(80.0) : 18.0;
         if (!Double.isFinite(position) || !Double.isFinite(velocity) ||
                 Math.abs(position) > safetyLimit) {
-            abort(context, "PD validation exceeded its bounded travel envelope");
+            abort(context, "Operator-requested PDS test exceeded its bounded travel envelope");
         }
 
         move(context, command);
-        validationMaxPosition = Math.max(validationMaxPosition, position);
-        validationFinalError = error;
-        validationOvershoot = Math.max(0.0,
-                (validationMaxPosition - validationTarget) / validationTarget);
-        logSample(context, validationTarget, position, command);
+        testFinalError = error;
+        logSample(context, testTarget, position, command);
 
         boolean withinTolerance = Math.abs(error) <= errorTolerance &&
                 Math.abs(velocity) <= velocityTolerance;
         if (withinTolerance) {
-            if (validationSettledSince < 0.0) { validationSettledSince = elapsed; }
+            if (testSettledSince < 0.0) { testSettledSince = elapsed; }
         } else {
-            validationSettledSince = -1.0;
+            testSettledSince = -1.0;
         }
 
-        boolean settled = validationSettledSince >= 0.0 &&
-                elapsed - validationSettledSince >= VALIDATION_SETTLED_SECONDS;
-        if (!settled && elapsed < VALIDATION_TIMEOUT_SECONDS) { return false; }
+        boolean settled = testSettledSince >= 0.0 &&
+                elapsed - testSettledSince >= TEST_SETTLED_SECONDS;
+        if (!settled && elapsed < TEST_TIMEOUT_SECONDS) { return false; }
 
         context.getFollower().stop();
-        validationPassed = settled && validationOvershoot <= 0.35;
-        validationSummary = validationPassed
-                ? "PASSED: settled response, overshoot " +
-                        Math.round(validationOvershoot * 1000.0) / 10.0 + "%"
-                : "FAILED: response did not meet settling/overshoot limits";
-        if (csv != null) { csv.close(); }
-        if (!validationPassed) {
-            throw new IllegalStateException(
-                    "Identified PD gains failed the bounded point-to-point validation and were " +
-                            "not saved. Inspect CSV: " + getCsvPath()
-            );
-        }
-        return true;
+        testActive = false;
+        completedTestCount++;
+        operatorCheckSummary = settled
+                ? "Test complete; inspect the response and run again or accept"
+                : "Test stopped after timeout; retune if the response is not acceptable";
+        return false;
     }
 
     /**
      * The PDS controller deliberately softens its static-friction term near zero error. If the
-     * robot has stopped just outside the validation tolerance, that softened output can fall below
+     * robot has stopped just outside the test tolerance, that softened output can fall below
      * the measured breakaway command and leave an otherwise valid controller permanently stuck.
      * Apply the same narrow endpoint recovery used by the follower: only a stalled robot outside
      * tolerance receives enough power to move, and no floor is applied after it reaches tolerance.
      */
-    static double ensureValidationBreakawayPower(double requestedPower, double error,
-                                                  double velocity, double staticGain,
-                                                  double errorTolerance,
-                                                  double velocityTolerance) {
+    static double ensureTestBreakawayPower(double requestedPower, double error,
+                                           double velocity, double staticGain,
+                                           double errorTolerance,
+                                           double velocityTolerance) {
         if (!Double.isFinite(requestedPower) || !Double.isFinite(error) ||
                 !Double.isFinite(velocity) || !Double.isFinite(staticGain) ||
                 !Double.isFinite(errorTolerance) || errorTolerance < 0.0 ||
@@ -351,15 +372,15 @@ public class PDSRoutine {
         boolean stalled = Math.abs(velocity) < velocityTolerance;
         if (!outsideTolerance || !stalled) { return requestedPower; }
 
-        double minimumPower = Math.min(MAX_VALIDATION_POWER,
-                Math.abs(staticGain) + VALIDATION_BREAKAWAY_RESERVE);
+        double minimumPower = Math.min(MAX_TEST_POWER,
+                Math.abs(staticGain) + TEST_BREAKAWAY_RESERVE);
         if (Math.abs(requestedPower) >= minimumPower) { return requestedPower; }
         return Math.copySign(minimumPower, error);
     }
 
     private void abort(TunerContext context, String reason) {
         context.getFollower().stop();
-        validationSummary = "FAILED: " + reason;
+        operatorCheckSummary = "FAILED: " + reason;
         if (csv != null) { csv.close(); }
         throw new IllegalStateException(reason + ". See PDS CSV: " + getCsvPath());
     }
@@ -403,7 +424,7 @@ public class PDSRoutine {
     void reportProgress(TunerContext context) {
         context.getTelemetry().addLine("Automatic " + axis.toString().toLowerCase() +
                 " tuning in progress");
-        context.getTelemetry().addLine(actionDescription());
+        context.getTelemetry().addLine(actionDescription(context));
         if (!context.isDebugMode()) {
             context.getTelemetry().update();
             return;
@@ -431,17 +452,19 @@ public class PDSRoutine {
             context.getTelemetry().addData("Ultimate gain", relayEstimate.ultimateGain);
             context.getTelemetry().addData("Ultimate period", relayEstimate.periodSeconds);
         }
-        if (state == PDSState.VALIDATING_PD) {
-            context.getTelemetry().addData("Validation target", validationTarget);
-            context.getTelemetry().addData("Validation error", validationFinalError);
-            context.getTelemetry().addData("Validation overshoot", validationOvershoot);
+        if (state == PDSState.OPERATOR_CHECK) {
+            context.getTelemetry().addData("Operator tests completed", completedTestCount);
+            context.getTelemetry().addData("Current test target", testTarget);
+            context.getTelemetry().addData("Current test error", testFinalError);
         }
         context.getTelemetry().addData("CSV", getCsvPath());
-        context.getTelemetry().addLine("Keep the OpMode running until results appear.");
+        context.getTelemetry().addLine(state == PDSState.OPERATOR_CHECK
+                ? "The robot remains stopped until you request or accept a test."
+                : "Keep the OpMode running until identification finishes.");
         context.getTelemetry().update();
     }
 
-    private String actionDescription() {
+    private String actionDescription(TunerContext context) {
         switch (state) {
             case TUNING_KS:
                 return axis == Axis.HEADING
@@ -449,16 +472,21 @@ public class PDSRoutine {
                         : "Robot is finding the minimum power needed to move.";
             case SETTLING_BETWEEN_KS:
             case SETTLING_FOR_RELAY:
-            case SETTLING_FOR_VALIDATION:
+            case SETTLING_FOR_OPERATOR_CHECK:
                 return "Robot is stopping before the next test.";
             case TUNING_RELAY:
                 return axis == Axis.HEADING
                         ? "Robot is turning back and forth to identify its response."
                         : "Robot is driving back and forth to identify its response.";
-            case VALIDATING_PD:
-                return axis == Axis.HEADING
-                        ? "Robot is turning to a target to validate the controller."
-                        : "Robot is moving to a target to validate the controller.";
+            case OPERATOR_CHECK:
+                if (testActive) {
+                    return axis == Axis.HEADING
+                            ? "Robot is turning to the requested test target."
+                            : "Robot is driving to the requested test target.";
+                }
+                return operatorCheckSummary + ". Press " + context.control("X") +
+                        " to run the next alternating test, " + context.control("A") +
+                        " to accept, or " + context.control("B") + " to retune.";
             default:
                 return "Robot is running the controller test.";
         }
@@ -466,9 +494,7 @@ public class PDSRoutine {
 
     PDSCoefficients getCoefficients() { return controller.getCoefficients(); }
 
-    String getValidationSummary() { return validationSummary; }
-
-    boolean validationPassed() { return validationPassed; }
+    String getOperatorCheckSummary() { return operatorCheckSummary; }
 
     String getCsvPath() { return csv == null ? "Unavailable" : csv.getPath(); }
 }

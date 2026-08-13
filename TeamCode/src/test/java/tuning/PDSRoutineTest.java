@@ -135,12 +135,12 @@ public class PDSRoutineTest {
     }
 
     @Test
-    public void stalledValidationClearsSoftStaticFrictionDeadband() {
+    public void stalledOperatorTestClearsSoftStaticFrictionDeadband() {
         double tolerance = Math.toRadians(2.5);
 
-        // Exact values from the failed FTCodeSim validation: the softened PDS output was below
-        // breakaway while the robot sat 2.505 degrees beyond the target.
-        assertEquals(-0.25125, PDSRoutine.ensureValidationBreakawayPower(
+        // Exact values from an FTCodeSim point-to-point run: the softened PDS output was below
+        // breakaway while the robot sat 2.505 degrees beyond the requested target.
+        assertEquals(-0.25125, PDSRoutine.ensureTestBreakawayPower(
                 -0.2359652517928235,
                 -0.043727866438586505,
                 0.0,
@@ -150,14 +150,14 @@ public class PDSRoutineTest {
     }
 
     @Test
-    public void validationBreakawayFloorIsLimitedToStallOutsideTolerance() {
+    public void operatorTestBreakawayFloorIsLimitedToStallOutsideTolerance() {
         double tolerance = Math.toRadians(2.5);
 
-        assertEquals(-0.20, PDSRoutine.ensureValidationBreakawayPower(
+        assertEquals(-0.20, PDSRoutine.ensureTestBreakawayPower(
                 -0.20, -Math.toRadians(2.0), 0.0, 0.23125, tolerance, 0.10), 1e-9);
-        assertEquals(-0.20, PDSRoutine.ensureValidationBreakawayPower(
+        assertEquals(-0.20, PDSRoutine.ensureTestBreakawayPower(
                 -0.20, -Math.toRadians(3.0), -0.20, 0.23125, tolerance, 0.10), 1e-9);
-        assertEquals(-0.40, PDSRoutine.ensureValidationBreakawayPower(
+        assertEquals(-0.40, PDSRoutine.ensureTestBreakawayPower(
                 -0.40, -Math.toRadians(3.0), 0.0, 0.23125, tolerance, 0.10), 1e-9);
     }
 

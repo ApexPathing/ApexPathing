@@ -44,6 +44,24 @@ public class TunerContext {
 
     public Telemetry getTelemetry() { return opMode.telemetry; }
 
+    boolean testButtonWasPressed() { return opMode.gamepad1.xWasPressed(); }
+
+    boolean acceptButtonWasPressed() { return opMode.gamepad1.aWasPressed(); }
+
+    boolean retuneButtonWasPressed() { return opMode.gamepad1.bWasPressed(); }
+
+    String control(String button) {
+        if (!Boolean.getBoolean("apex.simulation.unlockTunerPhases")) { return button; }
+        switch (button) {
+            case "A": return "A [; key]";
+            case "B": return "B [left-bracket key]";
+            case "X": return "X [P key]";
+            case "Y": return "Y [- key]";
+            case "BACK": return "Back [Tab key]";
+            default: return button;
+        }
+    }
+
     public boolean isDebugMode() { return debugMode; }
 
     public boolean isEmergencyStopped() { return emergencyStopped; }
