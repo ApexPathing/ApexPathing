@@ -15,6 +15,7 @@ import org.codeblooded.ftcodesim.input.Keys;
 import org.codeblooded.ftcodesim.simulator.OpModeRegister;
 import org.firstinspires.ftc.teamcode.apexpathing.AutoTest;
 import org.firstinspires.ftc.teamcode.apexpathing.Constants;
+import org.firstinspires.ftc.teamcode.apexpathing.ExampleAutoPath;
 import org.firstinspires.ftc.teamcode.apexpathing.FollowerTuner;
 import org.firstinspires.ftc.teamcode.apexpathing.TeleOpTest;
 import org.json.JSONObject;
@@ -24,8 +25,11 @@ import java.util.HashSet;
 import java.util.Set;
 
 import core.Follower;
+import core.FollowerConstants;
+import controllers.PDSController.PDSCoefficients;
 import drivetrains.BaseDrivetrain;
 import geometry.Pose;
+import geometry.GeometryFactory;
 import localizers.Pinpoint;
 
 public class ApexSimulationTest {
@@ -176,10 +180,63 @@ public class ApexSimulationTest {
         );
     }
 
+    @Test
+    public void exampleAutoPathAndTurnConvergeInSimulation() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        configureKnownFollowerConstants();
+        Follower follower = new Follower(new Constants(), hardware.hardwareMap);
+        ExampleAutoPath auto = new ExampleAutoPath(follower, GeometryFactory.PoseMirror.NONE);
+
+        follower.follow(auto.testPath);
+        follower.update();
+        assertEquals("Callback not triggered yet", auto.callbackMessage);
+        runMovement(hardware, follower, 12.0);
+        feedforward.MotionParameters first = auto.testPath.getFeedforwardLut().getFFParams(0.0);
+        assertTrue("Example auto path did not finish: pose=" + follower.getPose() +
+                ", t=" + follower.getBestT() +
+                ", crossTrack=" + follower.getCrossTrackErrorIn() +
+                ", velocity=" + follower.getVelocity() +
+                ", firstV=" + first.getTangentialVel() +
+                ", firstA=" + first.getTangentialAccel() +
+                ", powers=" + follower.getDrivetrain().getLastFlPower() + "," +
+                follower.getDrivetrain().getLastFrPower() + "," +
+                follower.getDrivetrain().getLastBlPower() + "," +
+                follower.getDrivetrain().getLastBrPower(), !follower.isBusy());
+        assertTrue("Example auto path stopped too far from its endpoint",
+                follower.getPose().distanceTo(auto.testPath.getEndPose()).getIn() < 2.0);
+        assertEquals("Distance callback triggered!", auto.callbackMessage);
+
+        follower.follow(auto.testTurn);
+        runMovement(hardware, follower, 8.0);
+        assertTrue("Example auto turn did not finish", !follower.isBusy());
+        assertTrue("Example auto turn stopped at the wrong heading",
+                Math.abs(follower.getPose().getHeading().getShortestAngleTo(
+                        auto.testTurn.getEndPose().getHeading()).getRad()) < Math.toRadians(3.0));
+    }
+
     private static void assertPose(Pose expected, Pose actual) {
         assertEquals(expected.getX().getIn(), actual.getX().getIn(), 1e-9);
         assertEquals(expected.getY().getIn(), actual.getY().getIn(), 1e-9);
         assertEquals(expected.getHeading().getRad(), actual.getHeading().getRad(), 1e-9);
+    }
+
+    private static void configureKnownFollowerConstants() {
+        FollowerConstants constants = FollowerConstants.getInstance();
+        constants.angularCoeffs = new PDSCoefficients(3.32, 0.34, 0.24375);
+        constants.translationalCoeffs = new PDSCoefficients(0.149, 0.024, 0.24375);
+        constants.translationalKV = 0.01466;
+        constants.translationalKA = 0.00716;
+        constants.angularKV = 0.1364;
+        constants.angularKA = 0.0648;
+        constants.velocityFeedbackGain = 0.0;
+        constants.angularVelocityFeedbackGain = 0.0;
+        constants.kCentripetal = 0.0072;
+        constants.forwardVelLimitIn = 64.8;
+        constants.forwardAccelLimitIn = 132.6;
+        constants.strafeVelLimitIn = 53.6;
+        constants.strafeAccelLimitIn = 94.8;
+        constants.angularVelLimitRad = 6.96;
+        constants.angularAccelLimitRad = 14.66;
     }
 
     private static MotionVector simulateMotion(double x, double y, double turn) throws Exception {
@@ -207,6 +264,36 @@ public class ApexSimulationTest {
                 .getDeclaredMethod("forwardKinematics", double[].class);
         forwardKinematics.setAccessible(true);
         return (MotionVector) forwardKinematics.invoke(hardware.drivetrain, (Object) wheelVelocities);
+    }
+
+    private static void runMovement(ApexSimulation.Hardware hardware, Follower follower,
+                                    double timeoutSeconds) throws Exception {
+        long deadline = System.nanoTime() + (long) (timeoutSeconds * 1e9);
+        while (follower.isBusy() && System.nanoTime() < deadline) {
+            stepPhysics(hardware, 0.02);
+            follower.update();
+            Thread.sleep(20);
+        }
+    }
+
+    private static void stepPhysics(ApexSimulation.Hardware hardware, double dt) throws Exception {
+        double[] wheelVelocities = new double[hardware.drivetrain.motorNames.length];
+        for (int i = 0; i < hardware.drivetrain.motorNames.length; i++) {
+            SimMotor motor = (SimMotor) hardware.hardwareMap.get(
+                    DcMotorEx.class, hardware.drivetrain.motorNames[i]);
+            motor.update(dt);
+            wheelVelocities[i] = motor.getVelocity();
+        }
+
+        java.lang.reflect.Method forwardKinematics = hardware.drivetrain.getClass()
+                .getDeclaredMethod("forwardKinematics", double[].class);
+        forwardKinematics.setAccessible(true);
+        MotionVector robotVelocity = (MotionVector) forwardKinematics.invoke(
+                hardware.drivetrain, (Object) wheelVelocities);
+        hardware.drivetrain.velocity = robotVelocity.toFieldFrame(
+                hardware.drivetrain.position.theta);
+        hardware.drivetrain.position = hardware.drivetrain.position.step(
+                hardware.drivetrain.velocity, dt);
     }
 
     private static void assertWheelPowers(BaseDrivetrain<?> drivetrain,

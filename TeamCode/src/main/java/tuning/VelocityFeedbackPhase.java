@@ -1,6 +1,7 @@
 package tuning;
 
 import feedforward.MotionParameters;
+import geometry.Angle;
 import geometry.AngleUnit;
 import geometry.DistUnit;
 import geometry.GeometryFactory;
@@ -33,7 +34,6 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     private FollowerMovement currentMovement;
     private boolean forwardIsRunning;
-    private double currentTurnDirection;
 
     private FeedbackAxis axis;
     private int candidate;
@@ -60,10 +60,12 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     @Override
     protected void init() {
-        if (context.constants.translationalCoeffs.kD > 0.0) {
+        if (context.constants.velocityFeedbackGain <= 0.0 &&
+                context.constants.translationalCoeffs.kD > 0.0) {
             context.constants.velocityFeedbackGain = context.constants.translationalCoeffs.kD;
         }
-        if (context.constants.angularCoeffs.kD > 0.0) {
+        if (context.constants.angularVelocityFeedbackGain <= 0.0 &&
+                context.constants.angularCoeffs.kD > 0.0) {
             context.constants.angularVelocityFeedbackGain = context.constants.angularCoeffs.kD;
         }
         applyCurrentGains();
@@ -80,9 +82,9 @@ public class VelocityFeedbackPhase extends TuningPhase {
             context.getFollower().setPose(start);
         }
         forwardPath = factory.path(start, end)
-                .interpolateWith(InterpolationStyle.TANGENT_FORWARD).profiledBuild();
+                .interpolateWith(InterpolationStyle.CONSTANT_START_HEADING).profiledBuild();
         backwardPath = factory.path(end, start)
-                .interpolateWith(InterpolationStyle.TANGENT_FORWARD).profiledBuild();
+                .interpolateWith(InterpolationStyle.CONSTANT_START_HEADING).profiledBuild();
 
         Pose turned = factory.pose(-24, 0, 90);
         forwardTurn = factory.turn(start).turnTo(turned.getHeading()).profiledBuild();
@@ -144,10 +146,6 @@ public class VelocityFeedbackPhase extends TuningPhase {
             currentMovement = forwardPath;
         } else {
             currentMovement = forwardTurn;
-            double rawDelta = forwardTurn.getStartPose().getHeading()
-                    .getShortestAngleTo(forwardTurn.getEndPose().getHeading()).getRad();
-            currentTurnDirection = Math.signum(rawDelta > Math.PI ?
-                    rawDelta - 2 * Math.PI : rawDelta);
         }
 
         context.getFollower().follow(currentMovement);
@@ -174,19 +172,19 @@ public class VelocityFeedbackPhase extends TuningPhase {
             addError(desired.getTangentialVel(), actual, 1.0);
         } else {
             Turn turn = (Turn) currentMovement;
-            double traveled = turn.getStartPose().getHeading().getShortestAngleTo(
-                    context.getFollower().getPose().getHeading()
-            ).getRad() * currentTurnDirection;
+            double traveled = turnProfileProgress(
+                    turn, context.getFollower().getPose().getHeading());
 
             MotionParameters desired = turn.getFeedforwardLut()
-                    .getFFParams(Math.max(0.0, traveled));
+                    .getFFParams(traveled);
             double actual = context.getFollower().getVelocity().getHeading().getRad();
             addError(desired.getAngularVel(), actual, 0.05);
         }
     }
 
     private void addError(double target, double actual, double minimumTarget) {
-        if (Math.abs(target) > minimumTarget) {
+        if (Double.isFinite(target) && Double.isFinite(actual) &&
+                Math.abs(target) > minimumTarget) {
             double error = target - actual;
             errorSquared += error * error;
             errorSamples++;
@@ -211,12 +209,28 @@ public class VelocityFeedbackPhase extends TuningPhase {
             return false;
         }
 
+        if (errorSamples == 0) {
+            throw new IllegalStateException(
+                    "Velocity feedback trial produced no usable " + axis.name().toLowerCase() +
+                            " samples. Verify feedforward constants and localization."
+            );
+        }
         lastScore = Math.sqrt(errorSquared / errorSamples);
         return true;
     }
 
+    static double turnProfileProgress(Turn turn, Angle currentHeading) {
+        double signedSweep = turn.getStartPose().getHeading()
+                .getShortestAngleTo(turn.getEndPose().getHeading()).getRad();
+        double direction = Math.signum(signedSweep);
+        double signedTravel = turn.getStartPose().getHeading()
+                .getShortestAngleTo(currentHeading).getRad();
+        return Math.max(0.0, Math.min(Math.abs(signedSweep), signedTravel * direction));
+    }
+
     @Override
     protected boolean autoTuned() {
+        reportAutomaticProgress();
         if (!updateTest()) { return false; }
 
         scores[candidate] = lastScore;
@@ -251,6 +265,18 @@ public class VelocityFeedbackPhase extends TuningPhase {
         // If we are here, we have finished tuning both axes
         context.constants.angularVelocityFeedbackGain = center;
         return true;
+    }
+
+    private void reportAutomaticProgress() {
+        context.getTelemetry().addLine("Automatic velocity feedback tuning in progress");
+        context.getTelemetry().addData("Axis", axis);
+        context.getTelemetry().addData("Search round", (round + 1) + " / " + SEARCH_ROUNDS);
+        context.getTelemetry().addData("Candidate", (candidate + 1) + " / " + gains.length);
+        context.getTelemetry().addData("Candidate gain", gains[candidate]);
+        context.getTelemetry().addData("Direction", forwardIsRunning ? "OUTBOUND" : "RETURN");
+        context.getTelemetry().addData("Usable samples", errorSamples);
+        context.getTelemetry().addData("Last RMS score", lastScore);
+        context.getTelemetry().update();
     }
 
     @Override

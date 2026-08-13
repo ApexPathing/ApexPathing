@@ -65,4 +65,12 @@ public class FollowerVectorTest {
         Vector leftCorrection = leftNormal.times(leftError);
         assertTrue(leftCorrection.getY().getIn() < 0.0);
     }
+
+    @Test
+    public void profiledFeedforwardUsesAccelerationSignWhenStartingFromRest() {
+        assertEquals(1.0, Follower.feedforwardMotionSign(0.0, 30.0), 1e-9);
+        assertEquals(-1.0, Follower.feedforwardMotionSign(0.0, -30.0), 1e-9);
+        assertEquals(1.0, Follower.feedforwardMotionSign(10.0, -30.0), 1e-9);
+        assertEquals(0.0, Follower.feedforwardMotionSign(0.0, 0.0), 1e-9);
+    }
 }

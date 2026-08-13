@@ -333,7 +333,8 @@ public class Follower {
             Vector endTangent = segment.getFirstDerivative(1.0).normalize();
 
             // Process scheduled distance and angular callbacks
-            processCallbacks(s / segment.getLengthIn(), currentHeading);
+            double pathProgress = 1.0 - s / segment.getLengthIn();
+            processCallbacks(Range.clip(pathProgress, 0.0, 1.0), currentHeading);
 
             Vector robotVel = localizer.getVel().getVec();
             double distanceRemaining = segment.getDistanceToEndIn(targetPoseVec, t);
@@ -411,10 +412,11 @@ public class Follower {
             double totalTangentPower;
             if (t < 1.0) {
                 if (isProfiled) {
+                    double motionSign = feedforwardMotionSign(
+                            targets.getTangentialVel(), targets.getTangentialAccel());
                     double feedforward = translationalKV * targets.getTangentialVel() +
                             translationalKA * targets.getTangentialAccel() +
-                            Math.signum(targets.getTangentialVel()) *
-                                    constants.translationalCoeffs.kS;
+                            motionSign * constants.translationalCoeffs.kS;
 
                     // TODO: Verify p only feedback performance, compare to SquID
                     totalTangentPower = (targets.getTangentialVel() - robotTangentialVel) *
@@ -470,7 +472,8 @@ public class Follower {
             double s = segment.getDistanceToEndIn(targetPoseVec, t);
 
             // Process scheduled distance and angular callbacks
-            processCallbacks(s / segment.getLengthIn(), currentHeading);
+            double pathProgress = 1.0 - s / segment.getLengthIn();
+            processCallbacks(Range.clip(pathProgress, 0.0, 1.0), currentHeading);
 
             Vector velVec = segment.getFirstDerivative(t);
             Vector robotVel = localizer.getVel().getVec();
@@ -727,6 +730,13 @@ public class Follower {
         double magnitude = tangentialVelocity * tangentialVelocity *
                 Math.abs(signedCurvature) * gain;
         return principalNormal.times(magnitude);
+    }
+
+    /** Uses acceleration to select static-friction direction while a profile starts from rest. */
+    static double feedforwardMotionSign(double targetVelocity, double targetAcceleration) {
+        if (Math.abs(targetVelocity) > 1e-6) { return Math.signum(targetVelocity); }
+        if (Math.abs(targetAcceleration) > 1e-6) { return Math.signum(targetAcceleration); }
+        return 0.0;
     }
 
     public void setVelocityFeedback(double velocityFeedbackGain,
