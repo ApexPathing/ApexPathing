@@ -1,14 +1,12 @@
 package org.firstinspires.ftc.teamcode.sim;
 
-import org.codeblooded.ftcodesim.ascope.SeasonField;
-import org.codeblooded.ftcodesim.ascope.SourceType;
-import org.codeblooded.ftcodesim.ascope.boundaries.MotionVector;
-import org.codeblooded.ftcodesim.ascope.boundaries.RobotGeometry;
 import org.codeblooded.ftcodesim.hardware.SimHardwareMap;
 import org.codeblooded.ftcodesim.hardware.drivetrain.SimMecanumConfig;
 import org.codeblooded.ftcodesim.hardware.drivetrain.SimulatedDrivetrain;
 import org.codeblooded.ftcodesim.hardware.drivetrain.SimulatedMecanum;
 import org.codeblooded.ftcodesim.input.DefaultKeybinds;
+import org.codeblooded.ftcodesim.physics.MotionVector;
+import org.codeblooded.ftcodesim.physics.RobotGeometry;
 import org.codeblooded.ftcodesim.simulator.FTCodeSim;
 import org.codeblooded.ftcodesim.simulator.FTCodeSimTelemetryInstaller;
 import org.codeblooded.ftcodesim.simulator.SimConfig;
@@ -38,7 +36,6 @@ public final class ApexSimulation {
         config.gamepad2Keybinds = new DefaultKeybinds();
         config.simHardwareMap = createHardware().hardwareMap;
         config.loopTimeMs = 20;
-        config.field = SeasonField.DECODE;
         return config;
     }
 
@@ -70,12 +67,9 @@ public final class ApexSimulation {
         config.staticFriction = 45;
         config.maxAcceleration = 150;
         config.maxVelocity = 75;
-        config.naturalDeceleration = 33;
-        config.quadraticBraking = 0.0014846306;
-        config.linearBraking = 0.09533276;
+        config.naturalDeceleration = 40;
         config.strafeEfficiency = 0.80;
         config.robotGeometry = new RobotGeometry(12, 18, 2, 0);
-        config.robotModel = SourceType.ROBOT_CODE_BLOODED_DECODE;
 
         SimulatedDrivetrain drivetrain = new SimulatedMecanum(config);
         SimHardwareMap hardwareMap = new SimHardwareMap();

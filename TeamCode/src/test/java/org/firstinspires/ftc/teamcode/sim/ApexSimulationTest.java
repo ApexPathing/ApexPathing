@@ -8,7 +8,7 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.Gamepad;
 
-import org.codeblooded.ftcodesim.ascope.boundaries.MotionVector;
+import org.codeblooded.ftcodesim.physics.MotionVector;
 import org.codeblooded.ftcodesim.hardware.devices.SimMotor;
 import org.codeblooded.ftcodesim.input.Keybinds;
 import org.codeblooded.ftcodesim.input.Keys;
@@ -112,6 +112,25 @@ public class ApexSimulationTest {
     }
 
     @Test
+    public void fittedMotorModelAcceleratesWheelsOverTime() {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        SimMotor motor = (SimMotor) hardware.hardwareMap.get(
+                DcMotorEx.class, hardware.drivetrain.motorNames[0]);
+
+        motor.setPower(0.5);
+        motor.update(0.02);
+        double firstVelocity = motor.getVelocity();
+        motor.update(0.02);
+        double secondVelocity = motor.getVelocity();
+
+        assertTrue("Fitted motor model did not overcome static friction", firstVelocity > 0.0);
+        assertTrue("Fitted motor model did not accelerate over the second time step",
+                secondVelocity > firstVelocity);
+        assertTrue("Motor velocity jumped instantly to its configured free speed",
+                firstVelocity < 75.0 / 1.889765);
+    }
+
+    @Test
     public void pinpointAdapterConvertsFieldCoordinatesAndHeading() {
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         SimApexPinpoint pinpoint = (SimApexPinpoint) hardware.hardwareMap.get(
@@ -210,7 +229,12 @@ public class ApexSimulationTest {
 
         follower.follow(auto.testTurn);
         runMovement(hardware, follower, 8.0);
-        assertTrue("Example auto turn did not finish", !follower.isBusy());
+        assertTrue("Example auto turn did not finish: pose=" + follower.getPose() +
+                ", velocity=" + follower.getVelocity() +
+                ", powers=" + follower.getDrivetrain().getLastFlPower() + "," +
+                follower.getDrivetrain().getLastFrPower() + "," +
+                follower.getDrivetrain().getLastBlPower() + "," +
+                follower.getDrivetrain().getLastBrPower(), !follower.isBusy());
         assertTrue("Example auto turn stopped at the wrong heading",
                 Math.abs(follower.getPose().getHeading().getShortestAngleTo(
                         auto.testTurn.getEndPose().getHeading()).getRad()) < Math.toRadians(3.0));

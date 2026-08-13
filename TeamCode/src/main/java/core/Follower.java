@@ -294,14 +294,16 @@ public class Follower {
                         turnTargets,
                         currentAngularVel
                 );
-                totalTurnPower = ensureAngularEndpointBreakawayPower(
-                        totalTurnPower,
-                        headingError,
-                        currentAngularVel,
-                        constants.angularCoeffs.kS,
-                        headingTol
-                );
             }
+            // Quick and profiled turns can both settle just outside tolerance after their
+            // command falls below drivetrain breakaway power.
+            totalTurnPower = ensureAngularEndpointBreakawayPower(
+                    totalTurnPower,
+                    headingError,
+                    currentAngularVel,
+                    constants.angularCoeffs.kS,
+                    headingTol
+            );
 
             Vector error = targetTurnPoseVec.minus(currentPos);
             double errorMag = error.getMag().getIn();

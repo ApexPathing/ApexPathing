@@ -2,7 +2,7 @@ package org.firstinspires.ftc.teamcode.sim;
 
 import com.qualcomm.robotcore.hardware.I2cDeviceSynchSimple;
 
-import org.codeblooded.ftcodesim.ascope.boundaries.MotionVector;
+import org.codeblooded.ftcodesim.physics.MotionVector;
 import org.codeblooded.ftcodesim.hardware.devices.SimHardwareDevice;
 import org.codeblooded.ftcodesim.hardware.drivetrain.SimulatedDrivetrain;
 

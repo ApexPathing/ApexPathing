@@ -36,7 +36,7 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
     testImplementation 'org.knowm.xchart:xchart:4.0.2'
-    // 9378778 initializes FtcDashboard's Android-only singleton on the desktop JVM. The previous
-    // published snapshot has the same simulator/DECODE APIs without that regression.
-    testImplementation 'org.codeblooded.ftcodesim:ftcodesim:SNAPSHOT-9b06f7d'
+    // The README currently shows org.codeblooded.ftcodesim as the group, but the published
+    // SNAPSHOT-9cb1d09 POM uses org.codeblooded.
+    testImplementation 'org.codeblooded:Simulator:SNAPSHOT-9cb1d09'
 }
