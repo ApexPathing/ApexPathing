@@ -1,5 +1,7 @@
 package tuning;
 
+import com.qualcomm.robotcore.util.ElapsedTime;
+
 import geometry.AngleUnit;
 import geometry.DistUnit;
 import geometry.GeometryFactory;
@@ -15,6 +17,8 @@ import paths.movements.Path;
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
 public class CentripetalPhase extends TuningPhase {
+    private static final double LEG_TIMEOUT_SECONDS = 15.0;
+
     private BinarySearch search;
     private Path forwardArc;
     private Path backwardArc;
@@ -23,6 +27,7 @@ public class CentripetalPhase extends TuningPhase {
     private double errorSum;
     private int samples;
     private double averageError;
+    private final ElapsedTime legTimer = new ElapsedTime();
 
     public CentripetalPhase(TunerContext context) { super(context); }
 
@@ -74,6 +79,7 @@ public class CentripetalPhase extends TuningPhase {
 
         context.getFollower().setCentripetal(context.constants.kCentripetal);
         context.getFollower().follow(forwardArc);
+        legTimer.reset();
     }
 
     private void sampleError() {
@@ -93,11 +99,22 @@ public class CentripetalPhase extends TuningPhase {
     private boolean updateTrial() {
         if (context.getFollower().isBusy()) {
             sampleError();
+            if (legTimer.seconds() > LEG_TIMEOUT_SECONDS) {
+                context.getFollower().stop();
+                throw new IllegalStateException(
+                        "Centripetal " + (forwardPathRunning ? "outbound" : "return") +
+                                " arc timed out at pose " + context.getFollower().getPose() +
+                                ", t=" + context.getFollower().getBestT() +
+                                ", velocity=" + context.getFollower().getVelocity() +
+                                ". Verify endpoint tolerances, localization, and PDS constants."
+                );
+            }
             return false;
         }
         if (forwardPathRunning) {
             forwardPathRunning = false;
             context.getFollower().follow(backwardArc);
+            legTimer.reset();
             return false;
         }
 
@@ -129,6 +146,13 @@ public class CentripetalPhase extends TuningPhase {
         context.getTelemetry().addData("Centripetal Vector",
                 context.getFollower().getCentripetalCorrection().toString());
         context.getTelemetry().addData("Average Error", averageError);
+        context.getTelemetry().addData("Direction",
+                forwardPathRunning ? "OUTBOUND" : "RETURN");
+        context.getTelemetry().addData("Leg elapsed",
+                Math.round(legTimer.seconds() * 10.0) / 10.0 + " / " +
+                        LEG_TIMEOUT_SECONDS + " s");
+        context.getTelemetry().addData("Current Velocity",
+                context.getFollower().getVelocity().toString());
         context.getTelemetry().update();
 
         if (!updateTrial()) {

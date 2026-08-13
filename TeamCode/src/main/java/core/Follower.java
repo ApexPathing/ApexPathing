@@ -389,6 +389,17 @@ public class Follower {
                     ? headingController.calculate(
                     headingTarg.getRad() - currentHeading.getRad()) : 0.0;
             double turnPow = Range.clip(headingFeedback + headingFF, -1.0, 1.0);
+            double endpointHeadingError = currentHeading.getShortestAngleTo(
+                    path.getEndPose().getHeading()).getRad();
+            if (distanceRemaining < PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES) {
+                turnPow = ensureAngularEndpointBreakawayPower(
+                        turnPow,
+                        endpointHeadingError,
+                        localizer.getVel().getHeading().getRad(),
+                        constants.angularCoeffs.kS,
+                        headingTol
+                );
+            }
 
             // Calculate lateral cross track power allocation
             Vector positionalError = targetPoseVec.minus(currentPos);
@@ -468,15 +479,17 @@ public class Follower {
                 double endpointPower = driveController.calculateEndDistance(signedEndpointError);
                 totalTangentPower = blendProfiledEndpointPower(
                         totalTangentPower, endpointPower, distanceRemaining);
-                totalTangentPower = ensureEndpointBreakawayPower(
-                        totalTangentPower,
-                        signedEndpointError,
-                        robotTangentialVel,
-                        constants.translationalCoeffs.kS,
-                        distanceTol,
-                        distanceRemaining
-                );
             }
+            // Quick paths can stall in the same softened-kS deadband. Apply the floor to either
+            // path type only when the robot is stationary near, but still outside, its tolerance.
+            totalTangentPower = ensureEndpointBreakawayPower(
+                    totalTangentPower,
+                    signedEndpointError,
+                    robotTangentialVel,
+                    constants.translationalCoeffs.kS,
+                    distanceTol,
+                    distanceRemaining
+            );
 
             Vector requestedTangentField = unitTangent.times(totalTangentPower);
             AllocatedCommand tangentCommand = allocateHolonomicStage(
@@ -493,8 +506,6 @@ public class Follower {
             // correcting until the complete pose is settled, especially for reverse curves where
             // endpoint projection can reach t=1 before the chassis reaches the point itself.
             double endpointDistance = currentPos.distanceTo(path.getEndPose().getVec()).getIn();
-            double endpointHeadingError = currentHeading.getShortestAngleTo(
-                    path.getEndPose().getHeading()).getRad();
             double currentAngularVelocity = localizer.getVel().getHeading().getRad();
             if (endpointDistance < distanceTol &&
                     Math.abs(endpointHeadingError) < headingTol &&

@@ -328,6 +328,45 @@ public class ApexSimulationTest {
                 Math.abs(follower.getPose().getHeading().getRad()) < Math.toRadians(2.0));
     }
 
+    @Test
+    public void centripetalQuickArcsCompleteBothDirections() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        configureKnownFollowerConstants();
+        Follower follower = new Follower(new Constants(), hardware.hardwareMap);
+        follower.setCentripetal(0.00664954474299773);
+
+        GeometryFactory factory = new GeometryFactory(follower)
+                .setDistUnit(geometry.DistUnit.IN)
+                .setAngleUnit(geometry.AngleUnit.DEG);
+        Pose start = factory.pose(-32, -16, 0);
+        Pose middle = factory.pose(32, -16, 0);
+        Pose end = factory.pose(32, 16, 90);
+        paths.movements.Path outbound = factory.path(start, middle, end)
+                .interpolateWith(paths.heading.InterpolationStyle.TANGENT_FORWARD)
+                .quickBuild();
+        paths.movements.Path returning = factory.path(end, middle, start)
+                .interpolateWith(paths.heading.InterpolationStyle.TANGENT_BACKWARD)
+                .quickBuild();
+
+        follower.setPose(start);
+        follower.follow(outbound);
+        runMovement(hardware, follower, 15.0);
+        assertTrue("Centripetal outbound arc did not finish: pose=" + follower.getPose() +
+                        ", t=" + follower.getBestT() + ", velocity=" +
+                        follower.getVelocity(),
+                !follower.isBusy());
+
+        follower.follow(returning);
+        runMovement(hardware, follower, 15.0);
+        assertTrue("Centripetal return arc did not finish: pose=" + follower.getPose() +
+                        ", t=" + follower.getBestT() + ", velocity=" +
+                        follower.getVelocity(),
+                !follower.isBusy());
+        assertTrue("Centripetal return arc did not settle at its endpoint: " +
+                        follower.getPose(),
+                follower.getPose().distanceTo(start).getIn() < 1.0);
+    }
+
     private static void assertPose(Pose expected, Pose actual) {
         assertEquals(expected.getX().getIn(), actual.getX().getIn(), 1e-9);
         assertEquals(expected.getY().getIn(), actual.getY().getIn(), 1e-9);
