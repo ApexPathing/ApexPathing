@@ -8,6 +8,8 @@ import org.psilynx.psikit.core.Logger;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import core.Follower;
+
 /** Runs FTCodeSim with the FTC SDK's real LinearOpMode lifecycle. */
 public final class FTCodeSimLinearOpModeRunner {
     private FTCodeSimLinearOpModeRunner() { }
@@ -48,14 +50,16 @@ public final class FTCodeSimLinearOpModeRunner {
         Logger.setSimulation(true);
         long start = System.nanoTime();
         Logger.setTimeSource(() -> (System.nanoTime() - start) * 1e-9);
+        Follower.setDiagnostics(new ApexAdvantageScopeLogger());
 
         AtomicBoolean userRequestedStop = new AtomicBoolean(false);
-        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(
-                opMode,
-                () -> userRequestedStop.set(true)
-        );
+        SimLinearOpModeBridge.Session session = null;
 
         try {
+            session = SimLinearOpModeBridge.initialize(
+                    opMode,
+                    () -> userRequestedStop.set(true)
+            );
             while (!lifecycle.isStarted
                     && !lifecycle.isStopped
                     && !userRequestedStop.get()) {
@@ -72,7 +76,10 @@ public final class FTCodeSimLinearOpModeRunner {
                 runEventLoopIteration(lifecycle, session);
             }
         } finally {
-            SimLinearOpModeBridge.stop(session);
+            if (session != null) {
+                SimLinearOpModeBridge.stop(session);
+            }
+            Follower.setDiagnostics(null);
             Logger.end();
         }
     }

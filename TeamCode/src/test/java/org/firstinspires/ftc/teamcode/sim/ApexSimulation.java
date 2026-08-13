@@ -9,6 +9,7 @@ import org.codeblooded.ftcodesim.physics.MotionVector;
 import org.codeblooded.ftcodesim.physics.RobotGeometry;
 import org.codeblooded.ftcodesim.simulator.FTCodeSim;
 import org.codeblooded.ftcodesim.simulator.FTCodeSimTelemetryInstaller;
+import org.codeblooded.ftcodesim.ascope.ApexAdvantageScopeLayout;
 import org.codeblooded.ftcodesim.simulator.SimConfig;
 import org.firstinspires.ftc.teamcode.apexpathing.FollowerTuner;
 
@@ -41,6 +42,7 @@ public final class ApexSimulation {
 
     public static FTCodeSim createSimulator() throws IOException {
         FTCodeSim simulator = new FTCodeSim(createConfig());
+        ApexAdvantageScopeLayout.install();
         installTelemetryAdapter(simulator);
         return simulator;
     }

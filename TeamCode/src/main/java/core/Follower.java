@@ -37,6 +37,18 @@ import paths.movements.Turn;
  * @author Xander Haemel - 31616 404 Not Found
  */
 public class Follower {
+    private static final FollowerDiagnostics NO_DIAGNOSTICS = new FollowerDiagnostics() {
+        @Override
+        public void recordPose(Pose pose) { }
+
+        @Override
+        public void recordCurrentPath(Path path) { }
+
+        @Override
+        public void clearCurrentPath() { }
+    };
+    private static volatile FollowerDiagnostics diagnostics = NO_DIAGNOSTICS;
+
     private static final double PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES = 4.0;
     private static final double ENDPOINT_BREAKAWAY_RESERVE = 0.02;
     private static final double ENDPOINT_STALLED_VELOCITY_IN_PER_SECOND = 0.25;
@@ -227,6 +239,7 @@ public class Follower {
      */
     public void update(boolean holdPose) {
         localizer.update();
+        diagnostics.recordPose(localizer.getPose());
 
         // Exit early if nothing is running or if paused.
         if (currentMovement == null || paused) {
@@ -607,6 +620,7 @@ public class Follower {
         this.lastPose = movement.getEndPose();
 
         if (movement instanceof Turn) {
+            diagnostics.clearCurrentPath();
             Turn turn = (Turn) currentMovement;
             this.targetTurnPoseVec = turn.getStartPose().getVec();
             double signedTurn = turn.getStartPose().getHeading().getShortestAngleTo(
@@ -617,6 +631,7 @@ public class Follower {
         } else if (movement instanceof Path) {
             Path pathSegmentMove = (Path) currentMovement;
             this.segment = pathSegmentMove.getParametricPath();
+            diagnostics.recordCurrentPath(pathSegmentMove);
             if (drivetrain instanceof DualActuated) {
                 if (pathSegmentMove.getPathType() == Path.PathType.HOLONOMIC) {
                     ((DualActuated) drivetrain).activateHolonomicState();
@@ -648,7 +663,17 @@ public class Follower {
         this.turnDirection = 0.0;
         this.turnTotalDisplacement = 0.0;
 
+        diagnostics.clearCurrentPath();
+
         this.drivetrain.stop();
+    }
+
+    /**
+     * Installs an optional diagnostics observer. Intended for simulator and logging integrations.
+     * Passing {@code null} restores the dependency-free no-op production default.
+     */
+    public static void setDiagnostics(FollowerDiagnostics observer) {
+        diagnostics = observer == null ? NO_DIAGNOSTICS : observer;
     }
 
     /** Halts the current movement temporarily without clearing the target state */

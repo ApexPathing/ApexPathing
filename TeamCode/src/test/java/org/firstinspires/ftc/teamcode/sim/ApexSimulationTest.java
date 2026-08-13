@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.sim;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
@@ -26,11 +27,13 @@ import java.util.Set;
 
 import core.Follower;
 import core.FollowerConstants;
+import core.FollowerDiagnostics;
 import controllers.PDSController.PDSCoefficients;
 import drivetrains.BaseDrivetrain;
 import geometry.Pose;
 import geometry.GeometryFactory;
 import localizers.Pinpoint;
+import paths.movements.Path;
 
 public class ApexSimulationTest {
     @Test
@@ -59,6 +62,28 @@ public class ApexSimulationTest {
         // path used by AutoTest, TeleOpTest, and FollowerTuner.
         Follower follower = new Follower(new Constants(), hardware.hardwareMap);
         assertPose(Pose.zero(), follower.getPose());
+    }
+
+    @Test
+    public void followerPublishesAndClearsItsActivePathForSimulatorDiagnostics() {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        Follower follower = new Follower(new Constants(), hardware.hardwareMap);
+        ExampleAutoPath auto = new ExampleAutoPath(follower, GeometryFactory.PoseMirror.NONE);
+        RecordingDiagnostics diagnostics = new RecordingDiagnostics();
+        Follower.setDiagnostics(diagnostics);
+
+        try {
+            follower.follow(auto.testPath);
+            assertSame(auto.testPath, diagnostics.path);
+
+            follower.update();
+            assertNotNull(diagnostics.pose);
+
+            follower.stop();
+            assertTrue(diagnostics.clearCount > 0);
+        } finally {
+            Follower.setDiagnostics(null);
+        }
     }
 
     @Test
@@ -500,5 +525,20 @@ public class ApexSimulationTest {
         assertEquals(fr, drivetrain.getLastFrPower(), 1e-9);
         assertEquals(bl, drivetrain.getLastBlPower(), 1e-9);
         assertEquals(br, drivetrain.getLastBrPower(), 1e-9);
+    }
+
+    private static final class RecordingDiagnostics implements FollowerDiagnostics {
+        Pose pose;
+        Path path;
+        int clearCount;
+
+        @Override
+        public void recordPose(Pose pose) { this.pose = pose; }
+
+        @Override
+        public void recordCurrentPath(Path path) { this.path = path; }
+
+        @Override
+        public void clearCurrentPath() { clearCount++; }
     }
 }

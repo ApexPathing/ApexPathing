@@ -36,6 +36,7 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
     testImplementation 'org.knowm.xchart:xchart:4.0.2'
+    testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
     // The README currently shows org.codeblooded.ftcodesim as the group, but the published
     // SNAPSHOT-9cb1d09 POM uses org.codeblooded.
     testImplementation 'org.codeblooded:Simulator:SNAPSHOT-9cb1d09'
