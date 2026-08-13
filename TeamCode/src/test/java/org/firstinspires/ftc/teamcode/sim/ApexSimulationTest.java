@@ -91,6 +91,11 @@ public class ApexSimulationTest {
         assertEquals(0.0, forward.y, 1e-9);
         assertEquals(0.0, forward.theta, 1e-9);
 
+        MotionVector backward = simulateMotion(-0.5, 0.0, 0.0);
+        assertTrue(backward.x < 0.0);
+        assertEquals(0.0, backward.y, 1e-9);
+        assertEquals(0.0, backward.theta, 1e-9);
+
         MotionVector left = simulateMotion(0.0, 0.5, 0.0);
         assertEquals(0.0, left.x, 1e-9);
         assertTrue(left.y > 0.0);
@@ -121,6 +126,20 @@ public class ApexSimulationTest {
         assertEquals(12.0, pose.getX().getIn(), 1e-9);
         assertEquals(5.0, pose.getY().getIn(), 1e-9);
         assertEquals(Math.PI / 3.0, pose.getHeading().getRad(), 1e-9);
+    }
+
+    @Test
+    public void pinpointPoseResetIsImmediatelyVisibleToFollower() {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        Follower follower = new Follower(new Constants(), hardware.hardwareMap);
+        Pose requested = new Pose(
+                geometry.Vector.of(12.0, -8.0, geometry.DistUnit.IN),
+                geometry.Angle.fromDeg(30.0)
+        );
+
+        follower.setPose(requested);
+
+        assertPose(requested, follower.getPose());
     }
 
     @Test

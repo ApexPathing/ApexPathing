@@ -5,10 +5,7 @@ import com.qualcomm.robotcore.util.Range;
 
 import controllers.PDSController;
 import controllers.PDSController.PDSCoefficients;
-import geometry.Angle;
-import geometry.DistUnit;
 import geometry.Pose;
-import geometry.Vector;
 
 /**
  * Tunes static friction and PD position gains. Static friction is found with a bounded search;
@@ -93,18 +90,7 @@ public class PDSRoutine {
     }
 
     private void resetAxisPose(TunerContext context) {
-        Pose stagingPose;
-        switch (axis) {
-            case DRIVE:
-                stagingPose = new Pose(Vector.of(-55.0, 0.0, DistUnit.IN), Angle.fromRad(0.0));
-                break;
-            case STRAFE:
-                stagingPose = new Pose(Vector.of(0.0, -55.0, DistUnit.IN), Angle.fromRad(0.0));
-                break;
-            default:
-                stagingPose = Pose.zero();
-                break;
-        }
+        Pose stagingPose = stagingPoseFor(axis);
         if (Boolean.getBoolean("apex.simulation.unlockTunerPhases")) {
             context.positionRobotForSimulation(stagingPose);
         } else {
@@ -112,8 +98,12 @@ public class PDSRoutine {
             // centered on its actual starting location.
             context.getFollower().setPose(Pose.zero());
         }
-        startValue = getValue(context.getFollower().getPose());
+        // Use the requested reset value instead of a potentially one-update-old hardware cache.
+        startValue = getValue(stagingPose);
     }
+
+    /** PDS relay and validation motion are bidirectional, so every axis starts at field center. */
+    static Pose stagingPoseFor(Axis ignored) { return Pose.zero(); }
 
     private void move(TunerContext context, double power) {
         switch (axis) {

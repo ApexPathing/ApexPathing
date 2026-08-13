@@ -57,7 +57,12 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
     }
 
     @Override
-    public void setPose(Pose newPose) { pinpoint.setPosition(newPose); }
+    public void setPose(Pose newPose) {
+        pinpoint.setPosition(newPose);
+        // Keep getPose() coherent until the next sensor update. This matters after tuner staging
+        // resets, where movement is measured relative to the newly requested pose immediately.
+        pose = newPose;
+    }
 
     /** Configuration class for goBILDA Pinpoint localizer. */
     public static class Constants implements BaseLocalizerConstants<Constants> {

@@ -5,8 +5,6 @@ import java.util.function.Supplier;
 import geometry.AngleUnit;
 import geometry.DistUnit;
 import geometry.GeometryFactory;
-import geometry.Pose;
-import geometry.Vector;
 import paths.heading.InterpolationStyle;
 import paths.movements.Path;
 
@@ -58,8 +56,8 @@ public class DrivePhase extends TuningPhase {
 
     @Override
     protected void init() {
-        positionRobotForSimulation(new Pose(
-                Vector.of(-55.0, 0.0, DistUnit.IN), geometry.Angle.fromRad(0.0)));
+        // Both automatic relay motion and the manual test path travel in both directions.
+        positionRobotForSimulation(geometry.Pose.zero());
         // We only want to use the existing drive coefficients if we are in manual mode
         if (manualMode) {
             context.getFollower().enableControllers();

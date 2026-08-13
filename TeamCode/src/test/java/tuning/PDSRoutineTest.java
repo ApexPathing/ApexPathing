@@ -120,4 +120,13 @@ public class PDSRoutineTest {
         analyzer.observe(time, 0.08);
         assertTrue(analyzer.hasStableEstimate());
     }
+
+    @Test
+    public void bidirectionalPdsTestsStageAtFieldCenter() {
+        for (PDSRoutine.Axis axis : PDSRoutine.Axis.values()) {
+            assertEquals(0.0, PDSRoutine.stagingPoseFor(axis).getX().getIn(), 1e-9);
+            assertEquals(0.0, PDSRoutine.stagingPoseFor(axis).getY().getIn(), 1e-9);
+            assertEquals(0.0, PDSRoutine.stagingPoseFor(axis).getHeading().getRad(), 1e-9);
+        }
+    }
 }
