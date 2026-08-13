@@ -86,7 +86,9 @@ public class PDSRoutine {
         csv = TuningCsvWriter.open(
                 "pds_" + axis.toString().toLowerCase(),
                 "time_s", "axis", "state", "target", "position", "error",
-                "velocity", "command", "relay_cycles"
+                "velocity", "command", "relay_cycles", "relay_amplitude",
+                "relay_period_s", "relay_amplitude_spread", "relay_period_spread",
+                "relay_deadline_s"
         );
     }
 
@@ -225,10 +227,10 @@ public class PDSRoutine {
         relay.observe(elapsed, position);
         double command = relay.getCommand();
         move(context, command);
-        logSample(context, 0.0, position, command);
 
         relayDeadlineSeconds = relay.recommendedTimeoutSeconds(
                 RELAY_MIN_TIMEOUT_SECONDS, RELAY_MAX_TIMEOUT_SECONDS);
+        logSample(context, 0.0, position, command);
         boolean timedOut = elapsed >= relayDeadlineSeconds;
         if (!relay.hasStableEstimate() && !timedOut) { return false; }
         if (relay.getCycleCount() < relay.getRequiredCycleCount()) {
@@ -236,7 +238,11 @@ public class PDSRoutine {
                     relay.getRequiredCycleCount() + " required complete oscillations");
         }
         if (!relay.hasStableEstimate()) {
-            abort(context, "Relay oscillations were not repeatable enough to tune safely");
+            RelayOscillationAnalyzer.Estimate candidate = relay.estimate();
+            abort(context, "Relay oscillations were not repeatable enough to tune safely " +
+                    "(amplitude IQR/median " + percent(candidate.amplitudeRelativeCentralSpread) +
+                    ", period IQR/median " + percent(candidate.periodRelativeCentralSpread) +
+                    "; limits 15.0% and 12.0%)");
         }
 
         relayEstimate = relay.estimate();
@@ -321,11 +327,22 @@ public class PDSRoutine {
     private void logSample(TunerContext context, double target, double position, double command) {
         if (csv == null) { return; }
         double velocity = getAxisVelocity(context);
+        RelayOscillationAnalyzer.Estimate candidate =
+                relay != null && relay.canEstimate() ? relay.estimate() : null;
         csv.writeRow(
                 sessionTimer.seconds(), axis, state, target, position,
                 target - position, velocity, command,
-                relay == null ? 0 : relay.getCycleCount()
+                relay == null ? 0 : relay.getCycleCount(),
+                candidate == null ? "" : candidate.amplitude,
+                candidate == null ? "" : candidate.periodSeconds,
+                candidate == null ? "" : candidate.amplitudeRelativeCentralSpread,
+                candidate == null ? "" : candidate.periodRelativeCentralSpread,
+                relay == null ? "" : relayDeadlineSeconds
         );
+    }
+
+    private static String percent(double fraction) {
+        return Math.round(fraction * 1000.0) / 10.0 + "%";
     }
 
     /** Classic closed-loop Ziegler-Nichols PD settings from ultimate gain and period. */
@@ -351,6 +368,15 @@ public class PDSRoutine {
                     relay.getCycleCount() + " / " + relay.getRequiredCycleCount());
             context.getTelemetry().addData("Adaptive relay deadline",
                     relayDeadlineSeconds + " s");
+            if (relay.canEstimate()) {
+                RelayOscillationAnalyzer.Estimate candidate = relay.estimate();
+                context.getTelemetry().addData("Relay amplitude", candidate.amplitude);
+                context.getTelemetry().addData("Relay period", candidate.periodSeconds);
+                context.getTelemetry().addData("Amplitude stability",
+                        percent(candidate.amplitudeRelativeCentralSpread) + " / 15.0%");
+                context.getTelemetry().addData("Period stability",
+                        percent(candidate.periodRelativeCentralSpread) + " / 12.0%");
+            }
         }
         if (relayEstimate != null) {
             context.getTelemetry().addData("Ultimate gain", relayEstimate.ultimateGain);

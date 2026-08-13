@@ -1,6 +1,7 @@
 package tuning;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -92,5 +93,31 @@ public class PDSRoutineTest {
         assertTrue(analyzer.getCycleCount() >= 2);
         assertTrue(analyzer.recommendedTimeoutSeconds(16.0, 45.0) > 30.0);
         assertTrue(analyzer.recommendedTimeoutSeconds(16.0, 45.0) <= 45.0);
+    }
+
+    @Test
+    public void unstableFullWindowGetsTimeForOutlierToAgeOut() {
+        RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.40, 0.07);
+        double[] recordedPeriods = {
+                2.3171296, 2.7425875, 3.3386255, 3.1592657, 3.6069202, 1.8639204
+        };
+        double time = 0.0;
+        analyzer.observe(time, 0.08);
+        for (double period : recordedPeriods) {
+            analyzer.observe(time + period / 2.0, -0.08);
+            time += period;
+            analyzer.observe(time, 0.08);
+        }
+
+        assertEquals(6, analyzer.getCycleCount());
+        assertFalse(analyzer.hasStableEstimate());
+        assertTrue(analyzer.recommendedTimeoutSeconds(16.0, 45.0) >
+                time + 2.0 * 3.6069202);
+
+        double recoveryPeriod = 3.40;
+        analyzer.observe(time + recoveryPeriod / 2.0, -0.08);
+        time += recoveryPeriod;
+        analyzer.observe(time, 0.08);
+        assertTrue(analyzer.hasStableEstimate());
     }
 }

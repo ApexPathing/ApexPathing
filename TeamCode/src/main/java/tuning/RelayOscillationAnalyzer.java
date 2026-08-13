@@ -12,6 +12,9 @@ import java.util.List;
 final class RelayOscillationAnalyzer {
     private static final int WINDOW_CYCLES = 5;
     private static final int MIN_CYCLES_BEFORE_ACCEPT = 6;
+    private static final int RECOVERY_CYCLES_AFTER_UNSTABLE_WINDOW = 2;
+    private static final double DEADLINE_MARGIN_FRACTION = 0.25;
+    private static final double MIN_DEADLINE_MARGIN_SECONDS = 0.50;
     private static final double MAX_AMPLITUDE_RELATIVE_CENTRAL_SPREAD = 0.15;
     private static final double MAX_PERIOD_RELATIVE_CENTRAL_SPREAD = 0.12;
 
@@ -87,6 +90,8 @@ final class RelayOscillationAnalyzer {
 
     int getRequiredCycleCount() { return MIN_CYCLES_BEFORE_ACCEPT; }
 
+    boolean canEstimate() { return amplitudes.size() >= WINDOW_CYCLES; }
+
     boolean hasStableEstimate() {
         if (amplitudes.size() < MIN_CYCLES_BEFORE_ACCEPT) { return false; }
         Estimate estimate = estimate();
@@ -112,8 +117,9 @@ final class RelayOscillationAnalyzer {
     }
 
     /**
-     * Chooses an absolute timeout from the periods already measured. The extra cycle margin lets a
-     * single anomalous cycle age out of the five-cycle estimation window without allowing an
+     * Chooses an absolute timeout from the periods already measured. Once enough cycles exist but
+     * their window is not yet repeatable, two more cycles plus scheduling margin are reserved. A
+     * single anomalous simulator/odometry interval can therefore age out without allowing an
      * unbounded robot test.
      */
     double recommendedTimeoutSeconds(double minimumSeconds, double maximumSeconds) {
@@ -125,8 +131,15 @@ final class RelayOscillationAnalyzer {
             conservativePeriod = Math.max(conservativePeriod, periods.get(i));
         }
         int cyclesStillNeeded = Math.max(0, MIN_CYCLES_BEFORE_ACCEPT - periods.size());
+        int recoveryCycles = periods.size() >= MIN_CYCLES_BEFORE_ACCEPT
+                ? RECOVERY_CYCLES_AFTER_UNSTABLE_WINDOW
+                : 1;
+        double schedulingMargin = Math.max(
+                MIN_DEADLINE_MARGIN_SECONDS,
+                conservativePeriod * DEADLINE_MARGIN_FRACTION
+        );
         double projectedDeadline = cycleStartSeconds +
-                (cyclesStillNeeded + 1.0) * conservativePeriod;
+                (cyclesStillNeeded + recoveryCycles) * conservativePeriod + schedulingMargin;
         return Math.min(maximumSeconds, Math.max(minimumSeconds, projectedDeadline));
     }
 
