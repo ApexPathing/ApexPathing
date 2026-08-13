@@ -73,4 +73,45 @@ public class FollowerVectorTest {
         assertEquals(1.0, Follower.feedforwardMotionSign(10.0, -30.0), 1e-9);
         assertEquals(0.0, Follower.feedforwardMotionSign(0.0, 0.0), 1e-9);
     }
+
+    @Test
+    public void profiledEndpointCaptureSuppliesPowerAfterVelocityProfileStops() {
+        assertEquals(0.0, Follower.blendProfiledEndpointPower(0.0, 0.25, 4.0), 1e-9);
+        assertEquals(0.125, Follower.blendProfiledEndpointPower(0.0, 0.25, 2.0), 1e-9);
+        assertEquals(0.25, Follower.blendProfiledEndpointPower(0.0, 0.25, 0.0), 1e-9);
+    }
+
+    @Test
+    public void endpointTangentErrorKeepsCorrectSignOnBothTravelDirections() {
+        Vector endpoint = Vector.of(-24.0, 0.0, DistUnit.IN);
+        Vector current = Vector.of(-22.0, 0.0, DistUnit.IN);
+        Vector returnTangent = Vector.of(-1.0, 0.0, DistUnit.IN);
+
+        assertEquals(2.0,
+                Follower.pathEndpointTangentError(endpoint, current, returnTangent), 1e-9);
+    }
+
+    @Test
+    public void stalledEndpointCommandClearsStaticFrictionDeadband() {
+        assertEquals(0.26375, Follower.ensureEndpointBreakawayPower(
+                0.18, 0.60, 0.0, 0.24375, 0.50, 0.0), 1e-9);
+        assertEquals(-0.26375, Follower.ensureEndpointBreakawayPower(
+                -0.18, -0.60, 0.0, 0.24375, 0.50, 0.0), 1e-9);
+
+        // Never inject breakaway power after reaching tolerance or while already moving.
+        assertEquals(0.18, Follower.ensureEndpointBreakawayPower(
+                0.18, 0.40, 0.0, 0.24375, 0.50, 0.0), 1e-9);
+        assertEquals(0.18, Follower.ensureEndpointBreakawayPower(
+                0.18, 0.60, 1.0, 0.24375, 0.50, 0.0), 1e-9);
+    }
+
+    @Test
+    public void stalledProfiledTurnClearsStaticFrictionDeadband() {
+        assertEquals(0.26375, Follower.ensureAngularEndpointBreakawayPower(
+                0.0, Math.toRadians(3.25), 0.0, 0.24375, Math.toRadians(1.0)), 1e-9);
+        assertEquals(-0.26375, Follower.ensureAngularEndpointBreakawayPower(
+                0.0, Math.toRadians(-3.25), 0.0, 0.24375, Math.toRadians(1.0)), 1e-9);
+        assertEquals(0.0, Follower.ensureAngularEndpointBreakawayPower(
+                0.0, Math.toRadians(0.5), 0.0, 0.24375, Math.toRadians(1.0)), 1e-9);
+    }
 }

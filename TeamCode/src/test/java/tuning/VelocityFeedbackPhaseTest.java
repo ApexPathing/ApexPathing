@@ -1,6 +1,8 @@
 package tuning;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -22,5 +24,13 @@ public class VelocityFeedbackPhaseTest {
         assertEquals(Math.toRadians(90.0),
                 VelocityFeedbackPhase.turnProfileProgress(
                         clockwiseReturn, Angle.zero()), 1e-9);
+    }
+
+    @Test
+    public void translationScoringExcludesAccelerationAndEndpointCaptureRegions() {
+        assertFalse(VelocityFeedbackPhase.isUsableTranslationSample(20.0, 2.0, 48.0));
+        assertTrue(VelocityFeedbackPhase.isUsableTranslationSample(20.0, 24.0, 48.0));
+        assertFalse(VelocityFeedbackPhase.isUsableTranslationSample(20.0, 47.0, 48.0));
+        assertFalse(VelocityFeedbackPhase.isUsableTranslationSample(0.5, 24.0, 48.0));
     }
 }

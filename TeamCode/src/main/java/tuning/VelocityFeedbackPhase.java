@@ -1,5 +1,7 @@
 package tuning;
 
+import com.qualcomm.robotcore.util.ElapsedTime;
+
 import feedforward.MotionParameters;
 import geometry.Angle;
 import geometry.AngleUnit;
@@ -23,6 +25,8 @@ import paths.movements.Turn;
  */
 public class VelocityFeedbackPhase extends TuningPhase {
     private static final int SEARCH_ROUNDS = 4;
+    private static final double DIRECTION_TIMEOUT_SECONDS = 12.0;
+    private static final double SAMPLE_EDGE_FRACTION = 0.10;
 
     enum FeedbackAxis { TRANSLATION, ANGULAR }
 
@@ -46,6 +50,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private double lastScore;
     private double translationScore;
     private double angularScore;
+    private final ElapsedTime directionTimer = new ElapsedTime();
 
     public VelocityFeedbackPhase(TunerContext context) { super(context); }
 
@@ -149,6 +154,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
         }
 
         context.getFollower().follow(currentMovement);
+        directionTimer.reset();
     }
 
     private void sampleTest() {
@@ -169,7 +175,10 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
             // X is forward, Y is sideways layout works perfectly with this dot product
             double actual = context.getFollower().getVelocity().getVec().dot(tangent).getIn();
-            addError(desired.getTangentialVel(), actual, 1.0);
+            if (isUsableTranslationSample(
+                    desired.getTangentialVel(), traveled, segment.getLengthIn())) {
+                addError(desired.getTangentialVel(), actual, 1.0);
+            }
         } else {
             Turn turn = (Turn) currentMovement;
             double traveled = turnProfileProgress(
@@ -194,7 +203,18 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private boolean updateTest() {
         sampleTest();
 
-        if (context.getFollower().isBusy()) { return false; }
+        if (context.getFollower().isBusy()) {
+            if (directionTimer.seconds() <= DIRECTION_TIMEOUT_SECONDS) { return false; }
+            context.getFollower().stop();
+            throw new IllegalStateException(
+                    "Velocity feedback " + axis.name().toLowerCase() + " candidate " +
+                            (candidate + 1) + " timed out during " +
+                            (forwardIsRunning ? "outbound" : "return") +
+                            " travel at gain " + gains[candidate] + ". Pose=" +
+                            context.getFollower().getPose() +
+                            ". Verify localization, feedforward, and PDS constants."
+            );
+        }
 
         if (forwardIsRunning) {
             forwardIsRunning = false;
@@ -206,6 +226,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
             }
 
             context.getFollower().follow(currentMovement);
+            directionTimer.reset();
             return false;
         }
 
@@ -263,6 +284,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
         }
 
         // If we are here, we have finished tuning both axes
+        angularScore = scores[best];
         context.constants.angularVelocityFeedbackGain = center;
         return true;
     }
@@ -274,6 +296,13 @@ public class VelocityFeedbackPhase extends TuningPhase {
         context.getTelemetry().addData("Candidate", (candidate + 1) + " / " + gains.length);
         context.getTelemetry().addData("Candidate gain", gains[candidate]);
         context.getTelemetry().addData("Direction", forwardIsRunning ? "OUTBOUND" : "RETURN");
+        context.getTelemetry().addData("Direction elapsed",
+                Math.round(directionTimer.seconds() * 10.0) / 10.0 + " / " +
+                        DIRECTION_TIMEOUT_SECONDS + " s");
+        int axisOffset = axis == FeedbackAxis.TRANSLATION ? 0 : SEARCH_ROUNDS * gains.length;
+        context.getTelemetry().addData("Overall candidate trial",
+                (axisOffset + round * gains.length + candidate + 1) + " / " +
+                        (2 * SEARCH_ROUNDS * gains.length));
         context.getTelemetry().addData("Usable samples", errorSamples);
         context.getTelemetry().addData("Last RMS score", lastScore);
         context.getTelemetry().update();
@@ -335,5 +364,16 @@ public class VelocityFeedbackPhase extends TuningPhase {
         context.getTelemetry().addData("Angular feedback gain",
                 context.constants.angularVelocityFeedbackGain);
         context.getTelemetry().addData("Angular root mean square error", angularScore);
+    }
+
+    static boolean isUsableTranslationSample(double targetVelocity, double traveled,
+                                               double pathLength) {
+        if (!Double.isFinite(targetVelocity) || !Double.isFinite(traveled) ||
+                !Double.isFinite(pathLength) || pathLength <= 0.0) {
+            return false;
+        }
+        double fraction = traveled / pathLength;
+        return Math.abs(targetVelocity) > 1.0 && fraction >= SAMPLE_EDGE_FRACTION &&
+                fraction <= 1.0 - SAMPLE_EDGE_FRACTION;
     }
 }

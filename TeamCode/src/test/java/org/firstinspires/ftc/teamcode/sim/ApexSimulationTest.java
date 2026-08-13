@@ -230,7 +230,9 @@ public class ApexSimulationTest {
 
         follower.follow(auto.strafeOutPath);
         double strafeOutCrossTrack = runMovement(hardware, follower, 8.0);
-        assertTrue("Outbound strafe did not finish", !follower.isBusy());
+        assertTrue("Outbound strafe did not finish: pose=" + follower.getPose() +
+                ", t=" + follower.getBestT() + ", velocity=" + follower.getVelocity(),
+                !follower.isBusy());
         assertTrue("Outbound strafe stopped too far from its endpoint",
                 follower.getPose().distanceTo(auto.strafeOutPath.getEndPose()).getIn() < 1.0);
         assertTrue("Outbound strafe cross-track error was excessive: " + strafeOutCrossTrack,
@@ -238,7 +240,10 @@ public class ApexSimulationTest {
 
         follower.follow(auto.strafeBackPath);
         double strafeBackCrossTrack = runMovement(hardware, follower, 8.0);
-        assertTrue("Return strafe did not finish", !follower.isBusy());
+        assertTrue("Return strafe did not finish: pose=" + follower.getPose() +
+                        ", t=" + follower.getBestT() + ", velocity=" +
+                        follower.getVelocity(),
+                !follower.isBusy());
         assertTrue("Full auto sequence did not return to the origin: " + follower.getPose(),
                 follower.getPose().distanceTo(Pose.zero()).getIn() < 1.0);
         assertTrue("Full auto sequence did not finish at zero heading",
@@ -246,6 +251,81 @@ public class ApexSimulationTest {
                         Pose.zero().getHeading()).getRad()) < Math.toRadians(3.0));
         assertTrue("Return strafe cross-track error was excessive: " + strafeBackCrossTrack,
                 strafeBackCrossTrack < 6.0);
+    }
+
+    @Test
+    public void velocityFeedbackTranslationCandidatesCompleteBothDirections() throws Exception {
+        double center = 0.025076489028092973;
+        double[] firstRoundGains = { center * 0.5, center, center * 1.5 };
+        for (double gain : firstRoundGains) {
+            runVelocityFeedbackTranslationTrial(gain);
+        }
+    }
+
+    private static void runVelocityFeedbackTranslationTrial(double gain) throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        configureKnownFollowerConstants();
+        Follower follower = new Follower(new Constants(), hardware.hardwareMap);
+        follower.setVelocityFeedback(gain, 0.34);
+
+        GeometryFactory factory = new GeometryFactory(follower)
+                .setDistUnit(geometry.DistUnit.IN)
+                .setAngleUnit(geometry.AngleUnit.DEG);
+        Pose start = factory.pose(-24, 0, 0);
+        Pose end = factory.pose(24, 0, 0);
+        paths.movements.Path outbound = factory.path(start, end)
+                .interpolateWith(paths.heading.InterpolationStyle.CONSTANT_START_HEADING)
+                .profiledBuild();
+        paths.movements.Path returning = factory.path(end, start)
+                .interpolateWith(paths.heading.InterpolationStyle.CONSTANT_START_HEADING)
+                .profiledBuild();
+
+        follower.setPose(start);
+        follower.follow(outbound);
+        runMovement(hardware, follower, 10.0);
+        assertTrue("Velocity-feedback outbound path did not finish at gain " + gain + ": " +
+                        follower.getPose(),
+                !follower.isBusy());
+
+        follower.follow(returning);
+        runMovement(hardware, follower, 10.0);
+        assertTrue("Velocity-feedback return path did not finish at gain " + gain + ": " +
+                        follower.getPose(),
+                !follower.isBusy());
+        assertTrue("Velocity-feedback return path did not settle at its endpoint: " +
+                        follower.getPose(),
+                follower.getPose().distanceTo(start).getIn() < 1.0);
+    }
+
+    @Test
+    public void velocityFeedbackAngularTrialCompletesBothDirections() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        configureKnownFollowerConstants();
+        Follower follower = new Follower(new Constants(), hardware.hardwareMap);
+        follower.setVelocityFeedback(0.0251, 0.3407374361258885);
+
+        GeometryFactory factory = new GeometryFactory(follower)
+                .setDistUnit(geometry.DistUnit.IN)
+                .setAngleUnit(geometry.AngleUnit.DEG);
+        Pose start = factory.pose(-24, 0, 0);
+        Pose turned = factory.pose(-24, 0, 90);
+        paths.movements.Turn outbound = factory.turn(start)
+                .turnTo(turned.getHeading()).profiledBuild();
+        paths.movements.Turn returning = factory.turn(turned)
+                .turnTo(start.getHeading()).profiledBuild();
+
+        follower.setPose(start);
+        follower.follow(outbound);
+        runMovement(hardware, follower, 8.0);
+        assertTrue("Velocity-feedback outbound turn did not finish: " + follower.getPose(),
+                !follower.isBusy());
+
+        follower.follow(returning);
+        runMovement(hardware, follower, 8.0);
+        assertTrue("Velocity-feedback return turn did not finish: " + follower.getPose(),
+                !follower.isBusy());
+        assertTrue("Velocity-feedback return turn did not settle at zero heading",
+                Math.abs(follower.getPose().getHeading().getRad()) < Math.toRadians(2.0));
     }
 
     private static void assertPose(Pose expected, Pose actual) {

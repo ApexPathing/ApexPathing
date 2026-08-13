@@ -37,6 +37,10 @@ import paths.movements.Turn;
  * @author Xander Haemel - 31616 404 Not Found
  */
 public class Follower {
+    private static final double PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES = 4.0;
+    private static final double ENDPOINT_BREAKAWAY_RESERVE = 0.02;
+    private static final double ENDPOINT_STALLED_VELOCITY_IN_PER_SECOND = 0.25;
+    private static final double PROFILED_HEADING_CAPTURE_RADIANS = Math.toRadians(10.0);
     private final FollowerConstants constants;
     private final BaseDrivetrain<?> drivetrain;
     private final BaseLocalizer<?> localizer;
@@ -290,6 +294,13 @@ public class Follower {
                         turnTargets,
                         currentAngularVel
                 );
+                totalTurnPower = ensureAngularEndpointBreakawayPower(
+                        totalTurnPower,
+                        headingError,
+                        currentAngularVel,
+                        constants.angularCoeffs.kS,
+                        headingTol
+                );
             }
 
             Vector error = targetTurnPoseVec.minus(currentPos);
@@ -330,7 +341,10 @@ public class Follower {
             Vector normal = PathSegment.calculateArcNormal(velVec, accelVec);
             crossTrackNormal = lateralNormal;
             pathNormal = normal;
+            Path path = (Path) currentMovement;
             Vector endTangent = segment.getFirstDerivative(1.0).normalize();
+            double signedEndpointError = pathEndpointTangentError(
+                    path.getEndPose().getVec(), currentPos, endTangent);
 
             // Process scheduled distance and angular callbacks
             double pathProgress = 1.0 - s / segment.getLengthIn();
@@ -341,7 +355,6 @@ public class Follower {
             double kappa = segment.getSignedCurvature(t);
             double dKappa = segment.getCurvatureDerivative(t);
 
-            Path path = (Path) currentMovement;
             boolean isProfiled = path.isProfiled();
             double distanceTraveled = path.getParametricPath().getLengthIn() - s;
             MotionParameters targets = isProfiled ?
@@ -441,8 +454,28 @@ public class Follower {
                 }
             } else {
                 // Apply reverse feedback if robot drifts past the final point
-                double distancePastEnd = currentPos.minus(targetPoseVec).dot(endTangent).getIn();
-                totalTangentPower = driveController.calculateEndDistance(-distancePastEnd);
+                // Profiled paths enter the unified endpoint blend below so the position
+                // controller is sampled exactly once per loop.
+                totalTangentPower = isProfiled ? 0.0 :
+                        driveController.calculateEndDistance(signedEndpointError);
+            }
+
+            if (isProfiled) {
+                // A profile reaches zero target velocity at its endpoint. Depending on odometry
+                // sampling, bestT can remain infinitesimally below 1.0, which previously left a
+                // stopped robot with zero tangential command forever. Blend into position control
+                // over the final few inches so profiled paths always capture the actual endpoint.
+                double endpointPower = driveController.calculateEndDistance(signedEndpointError);
+                totalTangentPower = blendProfiledEndpointPower(
+                        totalTangentPower, endpointPower, distanceRemaining);
+                totalTangentPower = ensureEndpointBreakawayPower(
+                        totalTangentPower,
+                        signedEndpointError,
+                        robotTangentialVel,
+                        constants.translationalCoeffs.kS,
+                        distanceTol,
+                        distanceRemaining
+                );
             }
 
             Vector requestedTangentField = unitTangent.times(totalTangentPower);
@@ -616,6 +649,53 @@ public class Follower {
         if (this.paused) {
             this.paused = false;
         }
+    }
+
+    static double pathEndpointTangentError(Vector endpoint, Vector current, Vector endTangent) {
+        return endpoint.minus(current).dot(endTangent).getIn();
+    }
+
+    static double blendProfiledEndpointPower(double profilePower, double endpointPower,
+                                               double pathDistanceRemaining) {
+        double blend = Range.clip(
+                (PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES - pathDistanceRemaining) /
+                        PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES,
+                0.0,
+                1.0
+        );
+        return profilePower * (1.0 - blend) + endpointPower * blend;
+    }
+
+    static double ensureEndpointBreakawayPower(double requestedPower, double endpointError,
+                                                double tangentialVelocity, double staticGain,
+                                                double positionTolerance,
+                                                double pathDistanceRemaining) {
+        boolean inEndpointCapture = pathDistanceRemaining <
+                PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES;
+        boolean outsideTolerance = Math.abs(endpointError) > positionTolerance;
+        boolean stalled = Math.abs(tangentialVelocity) <
+                ENDPOINT_STALLED_VELOCITY_IN_PER_SECOND;
+        if (!inEndpointCapture || !outsideTolerance || !stalled) { return requestedPower; }
+
+        double minimumPower = Math.min(1.0,
+                Math.abs(staticGain) + ENDPOINT_BREAKAWAY_RESERVE);
+        if (Math.abs(requestedPower) >= minimumPower) { return requestedPower; }
+        return Math.copySign(minimumPower, endpointError);
+    }
+
+    static double ensureAngularEndpointBreakawayPower(double requestedPower, double headingError,
+                                                       double angularVelocity, double staticGain,
+                                                       double headingTolerance) {
+        boolean inEndpointCapture = Math.abs(headingError) <
+                PROFILED_HEADING_CAPTURE_RADIANS;
+        boolean outsideTolerance = Math.abs(headingError) > headingTolerance;
+        boolean stalled = Math.abs(angularVelocity) < 0.05;
+        if (!inEndpointCapture || !outsideTolerance || !stalled) { return requestedPower; }
+
+        double minimumPower = Math.min(1.0,
+                Math.abs(staticGain) + ENDPOINT_BREAKAWAY_RESERVE);
+        if (Math.abs(requestedPower) >= minimumPower) { return requestedPower; }
+        return Math.copySign(minimumPower, headingError);
     }
 
     /**

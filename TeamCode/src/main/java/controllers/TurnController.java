@@ -66,6 +66,15 @@ public class TurnController {
         double targetVelocity = targets.getAngularVel();
         double targetAcceleration = targets.getAngularAccel();
 
+        // A displacement profile ends with both targets at zero. Without position recovery, a
+        // turn that loses its last bit of momentum before the heading tolerance receives exactly
+        // zero command forever. Use the tuned heading PDS to capture the endpoint; the velocity
+        // feedback tuner excludes this zero-target tail from its score.
+        if (Math.abs(targetVelocity) <= EPSILON &&
+                Math.abs(targetAcceleration) <= EPSILON) {
+            return clip(headingPds.calculate(headingError));
+        }
+
         double motionSign = 0.0;
         if (Math.abs(targetVelocity) > EPSILON) {
             motionSign = Math.signum(targetVelocity);
