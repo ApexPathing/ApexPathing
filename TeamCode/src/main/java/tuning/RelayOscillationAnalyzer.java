@@ -10,9 +10,12 @@ import java.util.List;
  * https://lup.lub.lu.se/record/8601786
  */
 final class RelayOscillationAnalyzer {
-    private static final int WINDOW_CYCLES = 5;
-    private static final int MIN_CYCLES_BEFORE_ACCEPT = 6;
-    private static final int RECOVERY_CYCLES_AFTER_UNSTABLE_WINDOW = 2;
+    private static final int WINDOW_PHASE_PAIRS = 5;
+    private static final int CYCLES_PER_PHASE_PAIR = 2;
+    private static final int MIN_CYCLES_BEFORE_ACCEPT =
+            WINDOW_PHASE_PAIRS * CYCLES_PER_PHASE_PAIR;
+    private static final int RECOVERY_CYCLES_AFTER_UNSTABLE_WINDOW =
+            (WINDOW_PHASE_PAIRS - 1) * CYCLES_PER_PHASE_PAIR;
     private static final double DEADLINE_MARGIN_FRACTION = 0.25;
     private static final double MIN_DEADLINE_MARGIN_SECONDS = 0.50;
     private static final double MAX_AMPLITUDE_RELATIVE_CENTRAL_SPREAD = 0.15;
@@ -39,6 +42,7 @@ final class RelayOscillationAnalyzer {
     private final double hysteresis;
     private final List<Double> amplitudes = new ArrayList<Double>();
     private final List<Double> periods = new ArrayList<Double>();
+    private final List<Double> phasePairPeriods = new ArrayList<Double>();
 
     private int commandSign = 1;
     private boolean cycleStarted;
@@ -73,6 +77,14 @@ final class RelayOscillationAnalyzer {
                         Double.isFinite(period) && Double.isFinite(amplitude)) {
                     periods.add(period);
                     amplitudes.add(amplitude);
+                    // A nonlinear drivetrain can settle into a period-two relay response: one
+                    // cycle is long and the next correspondingly short even though their combined
+                    // phase and amplitude are repeatable. Non-overlapping two-cycle windows expose
+                    // that stable aggregate without counting either cycle twice.
+                    if (periods.size() % CYCLES_PER_PHASE_PAIR == 0) {
+                        int last = periods.size() - 1;
+                        phasePairPeriods.add((periods.get(last - 1) + periods.get(last)) / 2.0);
+                    }
                 }
             }
             cycleStarted = true;
@@ -90,10 +102,10 @@ final class RelayOscillationAnalyzer {
 
     int getRequiredCycleCount() { return MIN_CYCLES_BEFORE_ACCEPT; }
 
-    boolean canEstimate() { return amplitudes.size() >= WINDOW_CYCLES; }
+    boolean canEstimate() { return phasePairPeriods.size() >= WINDOW_PHASE_PAIRS; }
 
     boolean hasStableEstimate() {
-        if (amplitudes.size() < MIN_CYCLES_BEFORE_ACCEPT) { return false; }
+        if (!canEstimate()) { return false; }
         Estimate estimate = estimate();
         return estimate.amplitudeRelativeCentralSpread <=
                 MAX_AMPLITUDE_RELATIVE_CENTRAL_SPREAD &&
@@ -101,11 +113,15 @@ final class RelayOscillationAnalyzer {
     }
 
     Estimate estimate() {
-        if (amplitudes.size() < WINDOW_CYCLES) {
-            throw new IllegalStateException("At least five complete relay cycles are required");
+        if (!canEstimate()) {
+            throw new IllegalStateException(
+                    "At least ten complete relay cycles are required");
         }
-        double[] recentAmplitudes = tail(amplitudes, WINDOW_CYCLES);
-        double[] recentPeriods = tail(periods, WINDOW_CYCLES);
+        // Keep amplitude validation cycle-by-cycle. Averaging adjacent amplitudes could hide a
+        // genuinely unstable high/low alternation, unlike period where that alternation is the
+        // phase pattern being measured intentionally.
+        double[] recentAmplitudes = tail(amplitudes, WINDOW_PHASE_PAIRS);
+        double[] recentPeriods = tail(phasePairPeriods, WINDOW_PHASE_PAIRS);
         double amplitude = median(recentAmplitudes);
         double period = median(recentPeriods);
         double amplitudeRelativeCentralSpread = relativeCentralSpread(
@@ -129,7 +145,8 @@ final class RelayOscillationAnalyzer {
         if (periods.isEmpty()) { return minimumSeconds; }
 
         double conservativePeriod = 0.0;
-        int first = Math.max(0, periods.size() - WINDOW_CYCLES);
+        int first = Math.max(0, periods.size() -
+                WINDOW_PHASE_PAIRS * CYCLES_PER_PHASE_PAIR);
         for (int i = first; i < periods.size(); i++) {
             conservativePeriod = Math.max(conservativePeriod, periods.get(i));
         }

@@ -29,7 +29,7 @@ public class PDSRoutineTest {
         double stableAmplitude = 0.75;
         double dt = 0.01;
 
-        for (double time = 0.0; time <= 10.0; time += dt) {
+        for (double time = 0.0; time <= 16.0; time += dt) {
             // Let the first two periods decay so the accepted tail must ignore startup behavior.
             double transientScale = time < 2.4 ? 1.0 + (2.4 - time) * 0.25 : 1.0;
             double position = stableAmplitude * transientScale *
@@ -63,7 +63,9 @@ public class PDSRoutineTest {
     @Test
     public void relayAnalyzerToleratesOneIsolatedPeriodOutlier() {
         RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.30, 0.10);
-        double[] periods = { 1.2, 1.2, 0.45, 1.2, 1.2, 1.2, 1.2 };
+        double[] periods = {
+                1.2, 1.2, 0.45, 1.2, 1.2, 1.2, 1.2, 1.2, 1.2, 1.2, 1.2, 1.2
+        };
         double time = 0.0;
         double dt = 0.005;
 
@@ -126,7 +128,7 @@ public class PDSRoutineTest {
     public void unstableFullWindowGetsTimeForOutlierToAgeOut() {
         RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.40, 0.07);
         double[] recordedPeriods = {
-                2.3171296, 2.7425875, 3.3386255, 3.1592657, 3.6069202, 1.8639204
+                2.3, 2.7, 3.3, 3.2, 1.2, 1.3, 4.0, 4.2, 1.5, 1.6
         };
         double time = 0.0;
         analyzer.observe(time, 0.08);
@@ -136,16 +138,63 @@ public class PDSRoutineTest {
             analyzer.observe(time, 0.08);
         }
 
-        assertEquals(6, analyzer.getCycleCount());
+        assertEquals(10, analyzer.getCycleCount());
         assertFalse(analyzer.hasStableEstimate());
         assertTrue(analyzer.recommendedTimeoutSeconds(16.0, 45.0) >
-                time + 2.0 * 3.6069202);
+                time + 10.0);
 
         double recoveryPeriod = 3.40;
-        analyzer.observe(time + recoveryPeriod / 2.0, -0.08);
-        time += recoveryPeriod;
-        analyzer.observe(time, 0.08);
+        for (int i = 0; i < 8; i++) {
+            analyzer.observe(time + recoveryPeriod / 2.0, -0.08);
+            time += recoveryPeriod;
+            analyzer.observe(time, 0.08);
+        }
         assertTrue(analyzer.hasStableEstimate());
+    }
+
+    @Test
+    public void relayAnalyzerAcceptsRepeatableTwoCyclePhasePattern() {
+        RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.45125, 1.5);
+        double[] recordedPeriods = {
+                2.5104433, 1.5552978, 2.2200051, 4.0076077, 1.3598517,
+                2.8786151, 1.1795738, 1.6801490, 2.3172697, 1.6451795
+        };
+        double[] recordedAmplitudes = {
+                2.4547365, 2.4582154, 2.4905096, 2.5103418, 2.1853879,
+                2.2929554, 2.7173086, 2.9082679, 2.4047751, 2.7390830
+        };
+        double time = 0.0;
+        double positiveThreshold = 1.51;
+        analyzer.observe(time, positiveThreshold);
+        for (int i = 0; i < recordedPeriods.length; i++) {
+            double period = recordedPeriods[i];
+            analyzer.observe(time + period / 2.0,
+                    positiveThreshold - 2.0 * recordedAmplitudes[i]);
+            time += period;
+            analyzer.observe(time, positiveThreshold);
+        }
+
+        assertEquals(10, analyzer.getCycleCount());
+        assertTrue(analyzer.hasStableEstimate());
+        assertEquals(2.03287055, analyzer.estimate().periodSeconds, 0.08);
+        assertEquals(0.123, analyzer.estimate().amplitudeRelativeCentralSpread, 0.005);
+        assertTrue(analyzer.estimate().periodRelativeCentralSpread < 0.12);
+    }
+
+    @Test
+    public void relayAnalyzerRejectsUncorrelatedAggregatePeriodJitter() {
+        RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.40, 0.10);
+        double[] periods = { 0.7, 0.8, 1.6, 1.7, 0.9, 1.0, 1.8, 1.9, 0.6, 0.7 };
+        double time = 0.0;
+        analyzer.observe(time, 0.2);
+        for (double period : periods) {
+            analyzer.observe(time + period / 2.0, -0.8);
+            time += period;
+            analyzer.observe(time, 0.8);
+        }
+
+        assertEquals(10, analyzer.getCycleCount());
+        assertFalse(analyzer.hasStableEstimate());
     }
 
     @Test
