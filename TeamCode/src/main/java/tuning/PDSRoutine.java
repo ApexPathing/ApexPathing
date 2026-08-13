@@ -33,7 +33,7 @@ public class PDSRoutine {
     private static final double GUESS_TIME_MS = 1500.0;
     private static final double SETTLING_TIME_MS = 750.0;
     private static final double RELAY_MIN_TIMEOUT_SECONDS = 16.0;
-    private static final double RELAY_MAX_TIMEOUT_SECONDS = 45.0;
+    private static final double RELAY_MAX_TIMEOUT_SECONDS = 60.0;
     private static final double VALIDATION_TIMEOUT_SECONDS = 4.0;
     private static final double VALIDATION_SETTLED_SECONDS = 0.50;
     private static final double MAX_VALIDATION_POWER = 0.75;
@@ -194,16 +194,23 @@ public class PDSRoutine {
     }
 
     private void beginRelayTest(TunerContext context) {
-        double basePower = axis == Axis.HEADING ? 0.38 : 0.35;
-        double excitationMargin = axis == Axis.HEADING ? 0.16 : 0.12;
-        double relayPower = Math.min(0.60, Math.max(
-                basePower,
-                Math.abs(controller.getCoefficients().kS) + excitationMargin
-        ));
+        double relayPower = relayPowerFor(axis, controller.getCoefficients().kS);
         double hysteresis = axis == Axis.HEADING ? Math.toRadians(4.0) : 1.5;
         relay = new RelayOscillationAnalyzer(relayPower, hysteresis);
         relayDeadlineSeconds = RELAY_MIN_TIMEOUT_SECONDS;
         validationSummary = "Collecting repeatable relay cycles";
+    }
+
+    /**
+     * Keeps relay excitation clearly above the measured breakaway command. Translational relay
+     * motion needs more reserve than the kS search itself: a command that only barely starts the
+     * wheels can repeatedly fall back into static friction after each reversal, producing a very
+     * slow stick-slip cycle whose period is not useful for controller identification.
+     */
+    static double relayPowerFor(Axis axis, double staticGain) {
+        double basePower = axis == Axis.HEADING ? 0.38 : 0.40;
+        double excitationMargin = axis == Axis.HEADING ? 0.16 : 0.22;
+        return Math.min(0.65, Math.max(basePower, Math.abs(staticGain) + excitationMargin));
     }
 
     private boolean updateRelay(TunerContext context) {

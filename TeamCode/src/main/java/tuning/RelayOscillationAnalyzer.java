@@ -123,7 +123,10 @@ final class RelayOscillationAnalyzer {
      * unbounded robot test.
      */
     double recommendedTimeoutSeconds(double minimumSeconds, double maximumSeconds) {
-        if (periods.size() < 2) { return minimumSeconds; }
+        // One complete period is already enough to prove that the initial fixed deadline is
+        // unrealistic. Waiting for a second period before extending it can abort a slow relay
+        // while that second period is still in progress.
+        if (periods.isEmpty()) { return minimumSeconds; }
 
         double conservativePeriod = 0.0;
         int first = Math.max(0, periods.size() - WINDOW_CYCLES);

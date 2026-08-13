@@ -96,6 +96,33 @@ public class PDSRoutineTest {
     }
 
     @Test
+    public void relayDeadlineExtendsAfterFirstSlowCycle() {
+        RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.36, 1.50);
+
+        // Reproduce the timing pattern from a slow translational FTCodeSim relay run. The second
+        // complete cycle would arrive after the old fixed 16-second deadline.
+        analyzer.observe(2.16, 1.51);
+        analyzer.observe(6.49, -1.51);
+        analyzer.observe(10.82, 1.51);
+
+        assertEquals(1, analyzer.getCycleCount());
+        assertTrue(analyzer.recommendedTimeoutSeconds(16.0, 60.0) > 50.0);
+        assertTrue(analyzer.recommendedTimeoutSeconds(16.0, 60.0) <= 60.0);
+    }
+
+    @Test
+    public void translationalRelayHasReserveAboveBreakawayPower() {
+        double staticGain = 0.24375;
+
+        assertEquals(0.46375,
+                PDSRoutine.relayPowerFor(PDSRoutine.Axis.DRIVE, staticGain), 1e-9);
+        assertEquals(0.46375,
+                PDSRoutine.relayPowerFor(PDSRoutine.Axis.STRAFE, staticGain), 1e-9);
+        assertTrue(PDSRoutine.relayPowerFor(PDSRoutine.Axis.DRIVE, staticGain) >=
+                staticGain + 0.20);
+    }
+
+    @Test
     public void unstableFullWindowGetsTimeForOutlierToAgeOut() {
         RelayOscillationAnalyzer analyzer = new RelayOscillationAnalyzer(0.40, 0.07);
         double[] recordedPeriods = {
