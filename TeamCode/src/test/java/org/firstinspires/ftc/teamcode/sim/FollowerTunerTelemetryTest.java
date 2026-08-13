@@ -11,6 +11,7 @@ import org.firstinspires.ftc.teamcode.apexpathing.FollowerTuner;
 import org.codeblooded.ftcodesim.input.Keybinds;
 import org.codeblooded.ftcodesim.input.Keys;
 import org.codeblooded.ftcodesim.hardware.devices.SimMotor;
+import org.codeblooded.ftcodesim.physics.MotionVector;
 import org.junit.Test;
 
 import java.util.Collections;
@@ -355,6 +356,82 @@ public class FollowerTunerTelemetryTest {
         }
     }
 
+    @Test(timeout = 60_000L)
+    public void automaticFeedforwardCharacterizationPassesWithSimMotorModel() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        markAllPhasesCompleteForSelectionTest();
+        List<String> frames = new CopyOnWriteArrayList<>();
+        ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
+        telemetry.setMsTransmissionInterval(0);
+
+        FollowerTuner tuner = new FollowerTuner();
+        tuner.hardwareMap = hardware.hardwareMap;
+        tuner.telemetry = telemetry;
+        tuner.gamepad1 = new Gamepad();
+        tuner.gamepad2 = new Gamepad();
+
+        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(tuner, () -> { });
+        try {
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+            for (int i = 0; i < 6 && !latestFrameContains(frames, "FEEDFORWARD <"); i++) {
+                tuner.gamepad1.dpad_down = true;
+                pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+                tuner.gamepad1.dpad_down = false;
+                pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            }
+            assertTrue("Feedforward was not available in the phase selector",
+                    latestFrameContains(frames, "FEEDFORWARD <"));
+
+            tuner.gamepad1.b = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.b = false;
+            SimLinearOpModeBridge.start(session);
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+
+            tuner.gamepad1.a = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.a = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 50);
+
+            for (int run = 1; run <= 8; run++) {
+                String prompt = "Feedforward characterization " + run + " / 8";
+                long promptDeadline = System.nanoTime() + 6_000_000_000L;
+                while (!latestFrameContains(frames, prompt) &&
+                        System.nanoTime() < promptDeadline) {
+                    pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+                }
+                assertTrue("Timed out waiting for " + prompt, latestFrameContains(frames, prompt));
+
+                long stationaryDeadline = System.nanoTime() + 3_000_000_000L;
+                while (!latestFrameContains(frames, "Robot is stationary and ready.") &&
+                        System.nanoTime() < stationaryDeadline) {
+                    pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+                }
+                assertTrue("Robot did not settle before " + prompt,
+                        latestFrameContains(frames, "Robot is stationary and ready."));
+
+                tuner.gamepad1.a = true;
+                pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+                tuner.gamepad1.a = false;
+                pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            }
+
+            long resultDeadline = System.nanoTime() + 4_000_000_000L;
+            while (!latestFrameContains(frames, "Validation Angular PASSED; Translation PASSED") &&
+                    !latestFrameContains(frames, "did not pass validation") &&
+                    System.nanoTime() < resultDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
+
+            assertTrue("Simulated characterization did not pass. Latest telemetry:\n" +
+                    latestFrame(frames),
+                    latestFrameContains(frames,
+                            "Validation Angular PASSED; Translation PASSED"));
+        } finally {
+            SimLinearOpModeBridge.stop(session);
+        }
+    }
+
     private static void pump(
             SimLinearOpModeBridge.Session session,
             FollowerTuner tuner,
@@ -371,6 +448,54 @@ public class FollowerTunerTelemetryTest {
             telemetry.update();
             Thread.sleep(5);
         }
+    }
+
+    private static void pumpWithPhysics(
+            SimLinearOpModeBridge.Session session,
+            FollowerTuner tuner,
+            ApexSimTelemetry telemetry,
+            ApexSimulation.Hardware hardware,
+            long milliseconds
+    ) throws Exception {
+        long deadline = System.nanoTime() + milliseconds * 1_000_000L;
+        while (System.nanoTime() < deadline) {
+            stepPhysics(hardware, 0.005);
+            SimLinearOpModeBridge.eventLoopIteration(
+                    session,
+                    tuner.gamepad1,
+                    tuner.gamepad2
+            );
+            telemetry.update();
+            Thread.sleep(5);
+        }
+    }
+
+    private static void stepPhysics(ApexSimulation.Hardware hardware, double dt) throws Exception {
+        double[] wheelVelocities = new double[hardware.drivetrain.motorNames.length];
+        for (int i = 0; i < hardware.drivetrain.motorNames.length; i++) {
+            SimMotor motor = (SimMotor) hardware.hardwareMap.get(
+                    DcMotorEx.class, hardware.drivetrain.motorNames[i]);
+            motor.update(dt);
+            wheelVelocities[i] = motor.getVelocity();
+        }
+
+        java.lang.reflect.Method forwardKinematics = hardware.drivetrain.getClass()
+                .getDeclaredMethod("forwardKinematics", double[].class);
+        forwardKinematics.setAccessible(true);
+        MotionVector robotVelocity = (MotionVector) forwardKinematics.invoke(
+                hardware.drivetrain, (Object) wheelVelocities);
+        hardware.drivetrain.velocity = robotVelocity.toFieldFrame(
+                hardware.drivetrain.position.theta);
+        hardware.drivetrain.position = hardware.drivetrain.position.step(
+                hardware.drivetrain.velocity, dt);
+    }
+
+    private static boolean latestFrameContains(List<String> frames, String text) {
+        return latestFrame(frames).contains(text);
+    }
+
+    private static String latestFrame(List<String> frames) {
+        return frames.isEmpty() ? "" : frames.get(frames.size() - 1);
     }
 
     private static void markAllPhasesCompleteForSelectionTest() {

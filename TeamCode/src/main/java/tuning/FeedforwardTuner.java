@@ -5,7 +5,6 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import geometry.AngleUnit;
 import geometry.Angle;
@@ -27,6 +26,8 @@ public class FeedforwardTuner extends TuningPhase {
     private static final double AUTO_SETTLE_TIME = 0.40;
     private static final double MIN_SAMPLE_TIME = 0.12;
     private static final double SIM_STAGING_OFFSET = 55.0;
+    private static final double STATIONARY_LINEAR_SPEED_IN_PER_SEC = 1.0;
+    private static final double STATIONARY_ANGULAR_SPEED_RAD_PER_SEC = 0.10;
 
     private enum Coefficient { ANGULAR_KV, ANGULAR_KA, TRANSLATIONAL_KV, TRANSLATIONAL_KA }
 
@@ -40,7 +41,7 @@ public class FeedforwardTuner extends TuningPhase {
 
     private enum Axis { ANGULAR, TRANSLATIONAL }
     private enum Excitation { QUASISTATIC, DYNAMIC }
-    private enum AutoStage { PROMPT, RUNNING, SETTLING, FITTING, DONE }
+    private enum AutoStage { PROMPT, RUNNING, SETTLING, FITTING, FAILED, DONE }
 
     private static final class AutoRun {
         final Axis axis;
@@ -113,6 +114,46 @@ public class FeedforwardTuner extends TuningPhase {
         }
     }
 
+    /** Produces a stable acceleration estimate from the measured velocity at tuner cadence. */
+    static final class VelocityDerivative {
+        private static final double FILTER_TIME_CONSTANT_SECONDS = 0.08;
+
+        private boolean initialized;
+        private double lastTime;
+        private double lastVelocity;
+        private double filteredAcceleration;
+
+        void reset() {
+            initialized = false;
+            lastTime = 0.0;
+            lastVelocity = 0.0;
+            filteredAcceleration = 0.0;
+        }
+
+        double update(double timeSeconds, double velocity) {
+            if (!Double.isFinite(timeSeconds) || !Double.isFinite(velocity)) {
+                return Double.NaN;
+            }
+            if (!initialized) {
+                initialized = true;
+                lastTime = timeSeconds;
+                lastVelocity = velocity;
+                return 0.0;
+            }
+
+            double dt = timeSeconds - lastTime;
+            double velocityChange = velocity - lastVelocity;
+            lastTime = timeSeconds;
+            lastVelocity = velocity;
+            if (dt <= 1e-4 || dt > 0.25) { return Double.NaN; }
+
+            double rawAcceleration = velocityChange / dt;
+            double alpha = dt / (FILTER_TIME_CONSTANT_SECONDS + dt);
+            filteredAcceleration += alpha * (rawAcceleration - filteredAcceleration);
+            return filteredAcceleration;
+        }
+    }
+
     private final List<Observation> angularObservations = new ArrayList<>();
     private final List<Observation> translationalObservations = new ArrayList<>();
     private AutoStage autoStage = AutoStage.PROMPT;
@@ -124,6 +165,7 @@ public class FeedforwardTuner extends TuningPhase {
     private String csvError;
     private boolean isForward = true;
     private boolean manualDriveHasRun = false;
+    private final VelocityDerivative velocityDerivative = new VelocityDerivative();
 
     public FeedforwardTuner(TunerContext context) {
         super(context);
@@ -163,16 +205,23 @@ public class FeedforwardTuner extends TuningPhase {
             manualState = ManualState.IDLE;
             context.getFollower().stop();
         } else {
-            angularObservations.clear();
-            translationalObservations.clear();
-            angularFit = null;
-            translationalFit = null;
-            validationMessage = "Collecting characterization data";
-            csvPath = "Pending";
-            csvError = null;
-            autoRunIndex = 0;
-            autoStage = AutoStage.PROMPT;
+            restartAutomaticCharacterization();
         }
+    }
+
+    private void restartAutomaticCharacterization() {
+        context.getFollower().stop();
+        angularObservations.clear();
+        translationalObservations.clear();
+        angularFit = null;
+        translationalFit = null;
+        validationMessage = "Collecting characterization data";
+        csvPath = "Pending";
+        csvError = null;
+        autoRunIndex = 0;
+        autoStage = AutoStage.PROMPT;
+        velocityDerivative.reset();
+        timer.reset();
     }
 
 
@@ -400,7 +449,7 @@ public class FeedforwardTuner extends TuningPhase {
         double angularVel = velocity.getHeading(AngleUnit.RAD);
         double driveVel = Math.abs(velocity.getX().getIn());
 
-        double time_sec = timer.time(TimeUnit.SECONDS);
+        double time_sec = timer.seconds();
         boolean working = manualState == ManualState.ANGULAR &&
                 time_sec < angularProfile.getTotalTime() || manualState == ManualState.DRIVE &&
                 time_sec < driveProfile.getTotalTime();
@@ -425,7 +474,7 @@ public class FeedforwardTuner extends TuningPhase {
             working = true;
         }
 
-        time_sec = timer.time(TimeUnit.SECONDS);
+        time_sec = timer.seconds();
         double targetVel = 0.0;
         double currentVel = 0.0;
 
@@ -486,6 +535,24 @@ public class FeedforwardTuner extends TuningPhase {
     protected boolean autoTuned() {
         if (autoStage == AutoStage.DONE) { return true; }
 
+        if (autoStage == AutoStage.FAILED) {
+            context.getFollower().stop();
+            context.getTelemetry().addLine("Feedforward characterization did not pass validation.");
+            context.getTelemetry().addData("Validation", validationMessage);
+            context.getTelemetry().addLine("The previous feedforward values are still active.");
+            context.getTelemetry().addLine("Press " + control("A") + " to retry automatically.");
+            context.getTelemetry().addLine("Press " + control("B") + " to switch to manual tuning.");
+            if (context.isDebugMode()) { reportFitDiagnostics(); }
+            context.getTelemetry().update();
+            if (opMode.gamepad1.aWasPressed()) {
+                restartAutomaticCharacterization();
+            } else if (opMode.gamepad1.bWasPressed()) {
+                manualMode = true;
+                init();
+            }
+            return false;
+        }
+
         if (autoStage == AutoStage.FITTING) {
             angularFit = fitFeedforward(
                     angularObservations, Math.abs(context.constants.angularCoeffs.kS));
@@ -495,25 +562,31 @@ public class FeedforwardTuner extends TuningPhase {
 
             boolean angularValid = angularFit.isValid();
             boolean translationalValid = translationalFit.isValid();
-            if (angularValid) {
+            if (angularValid && translationalValid) {
                 context.constants.angularKV = angularFit.kV;
                 context.constants.angularKA = angularFit.kA;
-            }
-            if (translationalValid) {
                 context.constants.translationalKV = translationalFit.kV;
                 context.constants.translationalKA = translationalFit.kA;
             }
-            validationMessage = "Angular " + (angularValid ? "PASSED" : "FAILED - kept prior values") +
-                    "; Translation " +
-                    (translationalValid ? "PASSED" : "FAILED - kept prior values");
+            validationMessage = "Angular " + (angularValid ? "PASSED" : "FAILED") +
+                    "; Translation " + (translationalValid ? "PASSED" : "FAILED");
+            if (!angularValid || !translationalValid) {
+                validationMessage += "; no candidate values applied";
+            }
             writeCharacterizationCsv();
-            autoStage = AutoStage.DONE;
-            return true;
+            autoStage = angularValid && translationalValid ? AutoStage.DONE : AutoStage.FAILED;
+            return autoStage == AutoStage.DONE;
         }
 
         AutoRun run = AUTO_RUNS[autoRunIndex];
         if (autoStage == AutoStage.PROMPT) {
             context.getFollower().stop();
+            Pose velocity = context.getFollower().getVelocity();
+            boolean stationary = Math.hypot(
+                    velocity.getX().getIn(), velocity.getY().getIn()) <=
+                    STATIONARY_LINEAR_SPEED_IN_PER_SEC &&
+                    Math.abs(velocity.getHeading(AngleUnit.RAD)) <=
+                            STATIONARY_ANGULAR_SPEED_RAD_PER_SEC;
             String direction = run.forward
                     ? (run.axis == Axis.ANGULAR ? "counterclockwise" : "forward")
                     : (run.axis == Axis.ANGULAR ? "clockwise" : "backward");
@@ -527,19 +600,25 @@ public class FeedforwardTuner extends TuningPhase {
                             " toward at least 72 inches of clear space.");
             context.getTelemetry().addLine("Press " + control("A") +
                     " when the robot is stationary and the direction is safe.");
+            context.getTelemetry().addLine(stationary
+                    ? "Robot is stationary and ready."
+                    : "Waiting for the robot to stop before starting.");
             context.getTelemetry().update();
-            if (opMode.gamepad1.aWasPressed()) {
+            if (opMode.gamepad1.aWasPressed() && stationary) {
                 double stagingX = run.axis == Axis.ANGULAR ? 0.0 :
                         (run.forward ? -SIM_STAGING_OFFSET : SIM_STAGING_OFFSET);
                 positionRobotForSimulation(new Pose(
                         Vector.of(stagingX, 0.0, DistUnit.IN), Angle.fromRad(0.0)));
+                velocityDerivative.reset();
                 timer.reset();
                 autoStage = AutoStage.RUNNING;
             }
             return false;
         }
 
-        double elapsed = timer.time(TimeUnit.SECONDS);
+        // ElapsedTime.time(TimeUnit.SECONDS) returns a whole number of seconds in FTC SDK 11.1.
+        // seconds() preserves the sub-second resolution required for a smooth quasistatic ramp.
+        double elapsed = timer.seconds();
         if (autoStage == AutoStage.RUNNING) {
             double duration = run.excitation == Excitation.QUASISTATIC
                     ? QUASISTATIC_TIME : DYNAMIC_TIME;
@@ -560,15 +639,12 @@ public class FeedforwardTuner extends TuningPhase {
                             signedPower, 0.0, 0.0);
                 }
 
-                if (elapsed >= MIN_SAMPLE_TIME) {
-                    Pose velocity = context.getFollower().getVelocity();
-                    Pose acceleration = context.getFollower().getAcceleration();
-                    double rawVelocity = run.axis == Axis.ANGULAR
-                            ? velocity.getHeading(AngleUnit.RAD)
-                            : velocity.getX().getIn();
-                    double rawAcceleration = run.axis == Axis.ANGULAR
-                            ? acceleration.getHeading(AngleUnit.RAD)
-                            : acceleration.getX().getIn();
+                Pose velocity = context.getFollower().getVelocity();
+                double rawVelocity = run.axis == Axis.ANGULAR
+                        ? velocity.getHeading(AngleUnit.RAD)
+                        : velocity.getX().getIn();
+                double rawAcceleration = velocityDerivative.update(elapsed, rawVelocity);
+                if (elapsed >= MIN_SAMPLE_TIME && Double.isFinite(rawAcceleration)) {
                     double measuredVelocity = Math.abs(rawVelocity);
                     // Project acceleration along the measured direction of travel. This remains
                     // correct even when a localizer's positive axis is opposite motor power, and
@@ -619,6 +695,25 @@ public class FeedforwardTuner extends TuningPhase {
             motion = run.forward ? "driving forward" : "driving backward";
         }
         return "Robot is " + motion + " for the feedforward test.";
+    }
+
+    private void reportFitDiagnostics() {
+        reportFitDiagnostics("Angular", angularFit);
+        reportFitDiagnostics("Translation", translationalFit);
+        context.getTelemetry().addData("Characterization CSV", csvPath);
+    }
+
+    private void reportFitDiagnostics(String axis, FitResult fit) {
+        if (fit == null) {
+            context.getTelemetry().addData(axis + " fit", "Unavailable");
+            return;
+        }
+        context.getTelemetry().addData(axis + " candidate kV", fit.kV);
+        context.getTelemetry().addData(axis + " candidate kA", fit.kA);
+        context.getTelemetry().addData(axis + " fit RMSE", fit.rmse);
+        context.getTelemetry().addData(axis + " cross-validation RMSE", fit.crossValidationRmse);
+        context.getTelemetry().addData(axis + " fit R^2", fit.rSquared);
+        context.getTelemetry().addData(axis + " samples", fit.sampleCount);
     }
 
     private void writeCharacterizationCsv() {
