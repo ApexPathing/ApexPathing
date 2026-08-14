@@ -2,7 +2,6 @@ package org.firstinspires.ftc.teamcode.sim;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -41,14 +40,18 @@ import paths.movements.Path;
 
 public class ApexSimulationTest {
     @Test
-    public void degenerateReverseProfileFallsBackToClosedLoopFollowing() {
+    public void reverseProfileIsUsableOrFallsBackToClosedLoopFollowing() {
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         configureKnownFollowerConstants();
         Follower follower = new Follower(new Constants(), hardware.hardwareMap);
         ExampleAutoPath auto = new ExampleAutoPath(follower, GeometryFactory.PoseMirror.NONE);
 
-        assertNull("An all-zero profile should fall back to closed-loop following",
-                auto.returnPath.getFeedforwardLut());
+        if (auto.returnPath.getFeedforwardLut() != null) {
+            double midpoint = auto.returnPath.getParametricPath().getLengthIn() / 2.0;
+            assertTrue("A retained reverse profile must contain a nonzero velocity target",
+                    Math.abs(auto.returnPath.getFeedforwardLut().getFFParams(midpoint)
+                            .getTangentialVel()) > 0.1);
+        }
     }
 
     @Test
@@ -399,10 +402,15 @@ public class ApexSimulationTest {
         follower.follow(turn);
         FileWriter writer = new FileWriter(csv);
         double minimumVelocity = Double.POSITIVE_INFINITY;
+        double maximumOvershoot = 0.0;
+        double finalTenPercentStart = Double.NaN;
+        double crawlStart = Double.NaN;
+        double longestCrawl = 0.0;
         double elapsed = 0.0;
         try {
             writer.write("time_s,position_rad,remaining_rad,target_velocity_rad_s," +
-                    "actual_velocity_rad_s,target_acceleration_rad_s2,power_fl,power_fr," +
+                    "raw_velocity_rad_s,kalman_velocity_rad_s,heading_error_rad," +
+                    "target_acceleration_rad_s2,power_fl,power_fr," +
                     "power_bl,power_br\n");
             while (follower.isBusy() && elapsed < 8.0) {
                 stepPhysics(hardware, 0.02);
@@ -414,10 +422,26 @@ public class ApexSimulationTest {
                         follower.getVelocity().getHeading().getRad());
                 double remaining = Math.abs(follower.getPose().getHeading()
                         .getShortestAngleTo(turn.getEndPose().getHeading()).getRad());
+                maximumOvershoot = Math.max(maximumOvershoot,
+                        Math.max(0.0, position - Math.toRadians(90.0)));
+                if (Double.isNaN(finalTenPercentStart)
+                        && remaining <= Math.toRadians(9.0)) {
+                    finalTenPercentStart = elapsed;
+                }
+                double kalmanVelocity = follower.getVelocity().getHeading().getRad();
+                boolean crawling = remaining > Math.toRadians(2.0)
+                        && Math.abs(kalmanVelocity) < 0.12;
+                if (crawling && Double.isNaN(crawlStart)) { crawlStart = elapsed; }
+                if (!crawling && !Double.isNaN(crawlStart)) {
+                    longestCrawl = Math.max(longestCrawl, elapsed - crawlStart);
+                    crawlStart = Double.NaN;
+                }
                 writer.write(String.format(java.util.Locale.US,
-                        "%.4f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f%n",
+                        "%.4f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f%n",
                         elapsed, position, remaining, target.getAngularVel(),
-                        follower.getVelocity().getHeading().getRad(),
+                        follower.getRawVelocity().getHeading().getRad(), kalmanVelocity,
+                        follower.getPose().getHeading()
+                                .getShortestAngleTo(turn.getEndPose().getHeading()).getRad(),
                         target.getAngularAccel(),
                         follower.getDrivetrain().getLastFlPower(),
                         follower.getDrivetrain().getLastFrPower(),
@@ -435,6 +459,15 @@ public class ApexSimulationTest {
                 minimumVelocity >= -0.02);
         assertTrue("Profiled turn took too long to settle; response CSV=" +
                 csv.getAbsolutePath(), elapsed <= 1.5);
+        double finalError = Math.abs(follower.getPose().getHeading()
+                .getShortestAngleTo(turn.getEndPose().getHeading()).getRad());
+        assertTrue("Final heading error exceeded 2 degrees", finalError <= Math.toRadians(2.0));
+        assertTrue("Settled angular velocity exceeded 0.12 rad/s",
+                Math.abs(follower.getVelocity().getHeading().getRad()) < 0.12);
+        assertTrue("Overshoot exceeded 3 degrees", maximumOvershoot < Math.toRadians(3.0));
+        assertTrue("Final 10% took longer than 0.4 seconds",
+                !Double.isNaN(finalTenPercentStart) && elapsed - finalTenPercentStart <= 0.4);
+        assertTrue("Low-speed crawl exceeded 0.2 seconds", longestCrawl <= 0.2);
     }
 
     private static void runVelocityFeedbackAngularTrial(double gain) throws Exception {

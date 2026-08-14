@@ -47,9 +47,7 @@ public final class ApexAdvantageScopeLayout {
         changed |= addRobotSource(twoDimensionalTab, mapper);
         changed |= putPathBehindRobot(twoDimensionalTab, mapper);
 
-        // Older layouts may already contain Apex's Pose2d[] as a "ghost" source. AdvantageScope
-        // renders that as a robot model at every sampled pose, which hides the live robot. Convert
-        // any such source in every field tab into a thin trajectory instead of leaving it behind.
+        // Normalize any older Apex path source and keep it ordered beneath the live robot.
         for (JsonNode tab : tabs) {
             if (tab instanceof ObjectNode && (tab.path("type").asInt(-1) == 2 ||
                     tab.path("type").asInt(-1) == 3) &&
@@ -98,7 +96,7 @@ public final class ApexAdvantageScopeLayout {
         return true;
     }
 
-    /** AdvantageScope draws earlier sources over later ones, so keep the path last and narrow. */
+    /** Earlier sources draw over later ones, so keep sampled robot boxes below the live robot. */
     private static boolean putPathBehindRobot(ObjectNode tab, ObjectMapper mapper) {
         ArrayNode sources = sources(tab, mapper);
         int existingIndex = sourceIndexByLogKey(sources, PATH_LOG_KEY);
@@ -110,12 +108,12 @@ public final class ApexAdvantageScopeLayout {
         } else {
             ObjectNode options = mapper.createObjectNode();
             options.put("color", "#00ff00");
-            options.put("size", "normal");
-            pathSource = source(mapper, "trajectory", PATH_LOG_KEY, "Pose2d[]", options);
+            options.put("model", "CodeBloodedDecode");
+            pathSource = source(mapper, "ghost", PATH_LOG_KEY, "Pose2d[]", options);
             changed = true;
         }
-        if (!"trajectory".equals(pathSource.path("type").asText())) {
-            pathSource.put("type", "trajectory");
+        if (!"ghost".equals(pathSource.path("type").asText())) {
+            pathSource.put("type", "ghost");
             changed = true;
         }
         if (!"Pose2d[]".equals(pathSource.path("logType").asText())) {
@@ -123,10 +121,15 @@ public final class ApexAdvantageScopeLayout {
             changed = true;
         }
         ObjectNode options = pathSource.with("options");
-        if (!"normal".equals(options.path("size").asText())) {
-            options.put("size", "normal");
+        if (!"#00ff00".equals(options.path("color").asText())) {
+            options.put("color", "#00ff00");
             changed = true;
         }
+        if (!"CodeBloodedDecode".equals(options.path("model").asText())) {
+            options.put("model", "CodeBloodedDecode");
+            changed = true;
+        }
+        if (options.remove("size") != null) { changed = true; }
         sources.add(pathSource);
         return changed;
     }

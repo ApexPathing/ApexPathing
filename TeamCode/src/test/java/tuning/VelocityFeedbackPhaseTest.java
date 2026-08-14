@@ -33,4 +33,27 @@ public class VelocityFeedbackPhaseTest {
         assertFalse(VelocityFeedbackPhase.isUsableTranslationSample(20.0, 47.0, 48.0));
         assertFalse(VelocityFeedbackPhase.isUsableTranslationSample(0.5, 24.0, 48.0));
     }
+
+    @Test
+    public void automaticCandidateRequiresHeldOutImprovementAndDirectionalAgreement() {
+        VelocityFeedbackPhase.CandidateResult incumbent = result(1.0, 1.0, 0.0);
+        assertTrue(VelocityFeedbackPhase.acceptsCandidate(
+                incumbent, result(0.90, 0.94, 0.0)));
+        assertFalse(VelocityFeedbackPhase.acceptsCandidate(
+                incumbent, result(0.70, 0.97, 0.0)));
+        assertFalse(VelocityFeedbackPhase.acceptsCandidate(
+                incumbent, result(0.60, 0.90, 0.0)));
+    }
+
+    @Test
+    public void automaticCandidateRejectsSaturationDependentImprovement() {
+        assertFalse(VelocityFeedbackPhase.acceptsCandidate(
+                result(1.0, 1.0, 0.0), result(0.85, 0.90, 0.25)));
+    }
+
+    private static VelocityFeedbackPhase.CandidateResult result(
+            double outbound, double returning, double saturation) {
+        return new VelocityFeedbackPhase.CandidateResult(
+                outbound, returning, 0.0, 0.0, 1.0, saturation);
+    }
 }

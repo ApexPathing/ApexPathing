@@ -50,17 +50,15 @@ public class ExampleAutoPath {
 
     private void build() {
         testPath = factory.path(startPose, // Forward and left curve
-                        factory.arcPose(30, 0, 10),
-                        factory.arcPose(30, -30, 10),
-                        factory.arcPose(-30, -30, 10),
-                        factory.arcPose(-30, 30, 10),
+                        factory.arcPose(30, 0, 7),
+                        factory.arcPose(30, -30, 7),
+                        factory.arcPose(-30, -30, 7),
+                        factory.arcPose(-30, 30, 7),
                         factory.pose(30, 30, -90)
                 )
-                .addHeadingNode(0.25, Angle.fromDeg(90))
-                .addHeadingNode(0.5, Angle.fromDeg(-90))
-                .addHeadingNode(0.75, Angle.fromDeg(90))
+                .interpolateWith(InterpolationStyle.TANGENT_FORWARD)
                 .addDistanceCallback(0.5, this::exampleDistanceCallback)
-                .quickBuild();
+                .profiledBuild();
 
         testTurn = factory.turn(testPath.getEndPose())
                 .turnTo(factory.angle(0))

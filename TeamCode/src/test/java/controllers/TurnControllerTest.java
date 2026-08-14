@@ -40,10 +40,16 @@ public class TurnControllerTest {
     @Test
     public void endpointCaptureBlendsSmoothlyBeforeProfileVelocityReachesZero() {
         assertEquals(0.20, TurnController.blendEndpointCapturePower(
-                0.20, 0.60, 1.0, 1.0), 1e-9);
+                0.20, 0.60, 0.30, 0.5, 0.30, 0.25), 1e-9);
+        assertEquals(0.30, TurnController.blendEndpointCapturePower(
+                0.20, 0.60, 0.15, 0.125, 0.30, 0.25), 1e-9);
         assertEquals(0.40, TurnController.blendEndpointCapturePower(
-                0.20, 0.60, 0.5, 1.0), 1e-9);
-        assertEquals(0.60, TurnController.blendEndpointCapturePower(
-                0.20, 0.60, 0.0, 1.0), 1e-9);
+                0.20, 0.60, 0.0, 0.125, 0.30, 0.25), 1e-9);
+    }
+
+    @Test
+    public void stalledRobotUsesPositionCaptureWithoutWaitingForZeroProfileVelocity() {
+        assertEquals(0.33333333333333337, TurnController.blendEndpointCapturePower(
+                0.20, 0.60, 0.20, 0.0, 0.30, 0.25), 1e-9);
     }
 }

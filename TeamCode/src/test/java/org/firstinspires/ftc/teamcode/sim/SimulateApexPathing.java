@@ -10,7 +10,7 @@ import org.junit.Test;
  */
 public class SimulateApexPathing {
     /** Set true when intentionally launching the interactive FTCodeSim window. */
-    private static final boolean RUN_INTERACTIVE_SIMULATOR = false;
+    private static final boolean RUN_INTERACTIVE_SIMULATOR = true;
 
     @Test
     public void selectAndRunOpMode() throws Exception {

@@ -23,18 +23,18 @@ public class ApexAdvantageScopeLayoutTest {
         ArrayNode tabs = (ArrayNode) root.path("hubs").path(0).path("state")
                 .path("tabs").path("tabs");
         assertEquals(2, tabs.size());
-        assertSource(tabs.get(0), "trajectory", "Pose2d[]",
+        assertSource(tabs.get(0), "ghost", "Pose2d[]",
                 "RealOutputs/Apex/CurrentPath");
         assertSource(tabs.get(1), "robot", "Pose2d",
                 "RealOutputs/Drivetrain/position ftc coords (m)");
-        assertSource(tabs.get(1), "trajectory", "Pose2d[]",
+        assertSource(tabs.get(1), "ghost", "Pose2d[]",
                 "RealOutputs/Apex/CurrentPath");
         assertEquals("robot", tabs.get(1).path("controller").path("sources")
                 .path(0).path("type").asText());
-        assertEquals("trajectory", tabs.get(1).path("controller").path("sources")
+        assertEquals("ghost", tabs.get(1).path("controller").path("sources")
                 .path(1).path("type").asText());
-        assertEquals("normal", tabs.get(1).path("controller").path("sources")
-                .path(1).path("options").path("size").asText());
+        assertEquals("CodeBloodedDecode", tabs.get(1).path("controller").path("sources")
+                .path(1).path("options").path("model").asText());
     }
 
     @Test
@@ -49,12 +49,12 @@ public class ApexAdvantageScopeLayoutTest {
 
         assertTrue(ApexAdvantageScopeLayout.configure(root, mapper));
         assertEquals("robot", sources.path(0).path("type").asText());
-        assertEquals("trajectory", sources.path(1).path("type").asText());
-        assertEquals("normal", sources.path(1).path("options").path("size").asText());
+        assertEquals("ghost", sources.path(1).path("type").asText());
+        assertEquals("#00ff00", sources.path(1).path("options").path("color").asText());
     }
 
     @Test
-    public void convertsLegacyGhostPathIntoTrajectoryInExistingFieldTabs() {
+    public void preservesGhostBoxesInExistingFieldTabs() {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode root = layoutWithThreeDimensionalTab(mapper);
         ArrayNode tabs = (ArrayNode) root.path("hubs").path(0).path("state")
@@ -71,8 +71,8 @@ public class ApexAdvantageScopeLayoutTest {
         tabs.add(existingField);
 
         assertTrue(ApexAdvantageScopeLayout.configure(root, mapper));
-        assertEquals("trajectory", sources.path(1).path("type").asText());
-        assertEquals("normal", sources.path(1).path("options").path("size").asText());
+        assertEquals("ghost", sources.path(1).path("type").asText());
+        assertEquals("CodeBloodedDecode", sources.path(1).path("options").path("model").asText());
     }
 
     private static ObjectNode layoutWithThreeDimensionalTab(ObjectMapper mapper) {

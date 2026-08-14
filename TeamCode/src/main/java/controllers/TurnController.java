@@ -16,7 +16,8 @@ public class TurnController {
     // Preserve breakaway authority through the low-speed end of profile deceleration. Waiting
     // until nearly zero lets static friction stop the robot for a loop before recovery restarts it.
     private static final double LOW_SPEED_ANGULAR_VELOCITY = 0.25;
-    private static final double ENDPOINT_CAPTURE_TARGET_VELOCITY = 1.0;
+    private static final double ENDPOINT_CAPTURE_HEADING = Math.toRadians(10.0);
+    private static final double ENDPOINT_CAPTURE_MEASURED_VELOCITY = 1.0;
     private static final double BREAKAWAY_RESERVE = 0.02;
     // Velocity feedback is a correction, not the primary command. Bounding its contribution keeps
     // an over-tuned/stale gain from turning profile tracking into full-power bang-bang control.
@@ -75,15 +76,6 @@ public class TurnController {
         double targetVelocity = targets.getAngularVel();
         double targetAcceleration = targets.getAngularAccel();
 
-        // A displacement profile ends with both targets at zero. Without position recovery, a
-        // turn that loses its last bit of momentum before the heading tolerance receives exactly
-        // zero command forever. Use the tuned heading PDS to capture the endpoint; the velocity
-        // feedback tuner excludes this zero-target tail from its score.
-        if (Math.abs(targetVelocity) <= EPSILON &&
-                Math.abs(targetAcceleration) <= EPSILON) {
-            return clip(headingPds.calculate(headingError));
-        }
-
         double motionSign = 0.0;
         if (Math.abs(targetVelocity) > EPSILON) {
             motionSign = Math.signum(targetVelocity);
@@ -97,14 +89,15 @@ public class TurnController {
                 * (targetVelocity - measuredAngularVelocity), intendedDirection);
 
         double requestedPower = feedforward + velocityFeedback;
-        // Blend into position capture while the displacement profile is still moving. Waiting
-        // for an exact zero-velocity row creates a discontinuous handoff: static friction can stop
-        // the robot short, followed by a visibly separate PDS restart on the next update.
-        if (Math.abs(targetVelocity) < ENDPOINT_CAPTURE_TARGET_VELOCITY) {
+        // Endpoint capture is based on actual remaining heading and motion, not a particular LUT
+        // row. This keeps the handoff continuous even when displacement advances in coarse steps
+        // or the chassis stops before the profile reaches its exact zero-velocity sample.
+        if (Math.abs(headingError) < ENDPOINT_CAPTURE_HEADING) {
             double positionPower = headingPds.calculate(headingError);
             requestedPower = blendEndpointCapturePower(
-                    requestedPower, positionPower, targetVelocity,
-                    ENDPOINT_CAPTURE_TARGET_VELOCITY);
+                    requestedPower, positionPower, headingError,
+                    measuredAngularVelocity, ENDPOINT_CAPTURE_HEADING,
+                    ENDPOINT_CAPTURE_MEASURED_VELOCITY);
         }
         return clip(ensureProfiledMotionBreakaway(
                 requestedPower,
@@ -134,15 +127,21 @@ public class TurnController {
     }
 
     static double blendEndpointCapturePower(double profilePower, double positionPower,
-                                            double targetVelocity,
-                                            double captureVelocity) {
+                                            double headingError, double measuredVelocity,
+                                            double captureHeading, double stalledVelocity) {
         if (!Double.isFinite(profilePower) || !Double.isFinite(positionPower) ||
-                !Double.isFinite(targetVelocity) || !Double.isFinite(captureVelocity) ||
-                captureVelocity <= 0.0) {
+                !Double.isFinite(headingError) || !Double.isFinite(measuredVelocity) ||
+                !Double.isFinite(captureHeading) || !Double.isFinite(stalledVelocity) ||
+                captureHeading <= 0.0 || stalledVelocity <= 0.0) {
             return profilePower;
         }
-        double positionWeight = Math.max(0.0,
-                Math.min(1.0, 1.0 - Math.abs(targetVelocity) / captureVelocity));
+        if (Math.abs(headingError) >= captureHeading) { return profilePower; }
+        double headingWeight = 1.0 - Math.abs(headingError) / captureHeading;
+        double stalledWeight = Math.max(0.0,
+                1.0 - Math.abs(measuredVelocity) / stalledVelocity);
+        // Do not let position-controller derivative braking fight a still-active high-speed
+        // profile. It takes authority progressively only as both angle and actual motion settle.
+        double positionWeight = headingWeight * stalledWeight;
         return profilePower * (1.0 - positionWeight) + positionPower * positionWeight;
     }
 

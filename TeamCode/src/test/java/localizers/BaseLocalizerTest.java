@@ -18,6 +18,7 @@ public class BaseLocalizerTest {
     @Test
     public void nativeVelocityUsesSharedVelocityAndAccelerationFilter() throws Exception {
         NativeVelocityLocalizer localizer = new NativeVelocityLocalizer();
+        localizer.setVelocityFilterMode(BaseLocalizer.VelocityFilterMode.MOVING_AVERAGE);
 
         localizer.setMeasuredVelocity(pose(0.0, 0.0, 0.0));
         localizer.update();
@@ -29,6 +30,32 @@ public class BaseLocalizerTest {
         assertEquals(7.0, localizer.getVel().getX().getIn(), EPSILON);
         assertTrue(localizer.getRawAccel().getX().getIn() > 0.0);
         assertTrue(localizer.getAccel().getX().getIn() > 0.0);
+    }
+
+    @Test
+    public void adaptiveKalmanIsTheDefaultAndSupportsAngularOnlyMotion() throws Exception {
+        NativeVelocityLocalizer localizer = new NativeVelocityLocalizer();
+        assertEquals(BaseLocalizer.VelocityFilterMode.ADAPTIVE_KALMAN,
+                localizer.getVelocityFilterMode());
+
+        localizer.setMeasuredVelocity(pose(0.0, 0.0, 0.0));
+        localizer.update();
+        Thread.sleep(5);
+        localizer.setMeasuredVelocity(pose(0.0, 0.0, 2.0));
+        localizer.update();
+
+        assertEquals(2.0, localizer.getRawVel().getHeading().getRad(), EPSILON);
+        assertTrue(localizer.getVel().getHeading().getRad() > 0.0);
+        assertEquals(0.0, localizer.getVel().getX().getIn(), EPSILON);
+    }
+
+    @Test
+    public void kalmanTuningIsExplicitAndFrozenAfterOneTimeCalibration() {
+        NativeVelocityLocalizer localizer = new NativeVelocityLocalizer();
+        localizer.setIsTuning(true);
+        assertTrue(localizer.isTuningVelocityFilter());
+        localizer.setIsTuning(false);
+        assertTrue(!localizer.isTuningVelocityFilter());
     }
 
     @Test

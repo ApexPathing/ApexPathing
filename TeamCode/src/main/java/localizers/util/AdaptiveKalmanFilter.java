@@ -2,6 +2,8 @@ package localizers.util;
 
 import geometry.Matrix;
 
+import java.util.function.LongSupplier;
+
 /**
  * A two-state linear Kalman filter designed for robotic kinematics (e.g., tracking [Velocity, Acceleration]).
  *
@@ -24,6 +26,7 @@ public class AdaptiveKalmanFilter implements DataFilter {
     private static final Matrix I = Matrix.identity(2);
 
     private boolean initialized;
+    private final LongSupplier nanoTimeSource;
     private Matrix x; // State Vector [value, rate]^T
     private Matrix P; // Covariance Matrix
     private long lastUpdateTimeNanos = -1;
@@ -42,7 +45,7 @@ public class AdaptiveKalmanFilter implements DataFilter {
 
     private double adaptationRate = 0.02;
     private double outlierSigma = 4.5;
-    private boolean isAutoTuning = true;
+    private boolean isAutoTuning = false;
 
     private int bootstrapSamples;
     private int sameDirectionGateCount;
@@ -62,6 +65,18 @@ public class AdaptiveKalmanFilter implements DataFilter {
         }
     }
 
+    public AdaptiveKalmanFilter() {
+        this(System::nanoTime);
+    }
+
+    /** Constructor exposed for deterministic estimator tests. */
+    public AdaptiveKalmanFilter(LongSupplier nanoTimeSource) {
+        if (nanoTimeSource == null) {
+            throw new IllegalArgumentException("nanoTimeSource cannot be null");
+        }
+        this.nanoTimeSource = nanoTimeSource;
+    }
+
     /**
      * Pushes the filter forward in time and assimilates a new raw sensor reading.
      *
@@ -74,7 +89,7 @@ public class AdaptiveKalmanFilter implements DataFilter {
      */
     @Override
     public FilterState update(double measurement) {
-        long currentNanos = System.nanoTime();
+        long currentNanos = nanoTimeSource.getAsLong();
         double dt;
 
         if (lastUpdateTimeNanos == -1) {
@@ -359,6 +374,9 @@ public class AdaptiveKalmanFilter implements DataFilter {
      * to lock onto the current sensor noise profile.
      */
     public void setAutoTuning(boolean enabled) {
+        if (this.isAutoTuning == enabled) {
+            return;
+        }
         this.isAutoTuning = enabled;
         if (enabled) {
             smoothedNis = 1.0;
