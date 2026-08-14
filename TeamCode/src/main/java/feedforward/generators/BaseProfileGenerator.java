@@ -623,7 +623,7 @@ public abstract class BaseProfileGenerator {
                                                  double prevVel, double maxDecel, double ds) {
         double accel = calculateTangentialAccel(prevVel, nextVel, ds);
         return !(accel < -maxDecel - EPSILON) &&
-                isPowerFeasible(path, prevPoint, currentPoint, prevVel, nextVel, accel);
+                isPowerFeasible(path, prevPoint, prevPoint, prevVel, prevVel, accel);
     }
 
     /** Checks an accelerating transition from {@code prevVel} to {@code nextVel}. */
@@ -632,7 +632,7 @@ public abstract class BaseProfileGenerator {
                                                 double prevVel, double maxAccel, double ds) {
         double accel = calculateTangentialAccel(prevVel, nextVel, ds);
         return !(accel > maxAccel + EPSILON) &&
-                isPowerFeasible(path, prevPoint, currentPoint, prevVel, nextVel, accel);
+                isPowerFeasible(path, prevPoint, prevPoint, prevVel, prevVel, accel);
     }
 
     /** Runs the subclass power model and compares it against normalized full power. */

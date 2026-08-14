@@ -68,6 +68,9 @@ public class Follower {
     private double velocityFeedbackGain;
     private double angularVelocityFeedbackGain;
 
+    /** When true, combined cross-track and centripetal power is reserved before heading power. */
+    private boolean prioritizeCentripetal = false;
+
     private FollowerMovement currentMovement ;
     private boolean paused = false;
 
@@ -371,8 +374,6 @@ public class Follower {
             HolonomicDriveModel driveModel = getActiveHolonomicDriveModel();
 
             // Localizers report field-axis velocity. Project it directly onto the path tangent;
-            // differentiating closest-point progress makes velocity jump when the projection
-            // jitters or changes spline branch, and v^2 magnifies that noise in centripetal power.
             double robotTangentialVel = robotVel.dot(unitTangent).getIn();
 
             // Calculate heading power allocation
@@ -421,13 +422,25 @@ public class Follower {
                     normal, robotTangentialVel, kappa, centripetalGain);
 
             Vector requestedLateralField = crossTrackCorrection.plus(centripetalCorrection);
+            AllocatedCommand lateralCommand;
+            if (prioritizeCentripetal) {
+                lateralCommand = allocateHolonomicStage(
+                        requestedLateralField, currentHeading, 1.0, driveModel);
+                turnPow = Range.clip(
+                        turnPow,
+                        -(1.0 - lateralCommand.getPowerDemand()),
+                        1.0 - lateralCommand.getPowerDemand()
+                );
+            } else {
+                lateralCommand = allocateHolonomicStage(
+                        requestedLateralField,
+                        currentHeading,
+                        1.0 - Math.abs(turnPow),
+                        driveModel
+                );
+            }
+
             double availableMotorPower = 1.0 - Math.abs(turnPow);
-            AllocatedCommand lateralCommand = allocateHolonomicStage(
-                    requestedLateralField,
-                    currentHeading,
-                    availableMotorPower,
-                    driveModel
-            );
 
             // Charge the corrected lateral demand before allocating tangent power. Mecanum uses
             // wheel-space L1 demand; isotropic drives combine orthogonal translation by magnitude.
@@ -479,23 +492,15 @@ public class Follower {
                 }
             } else {
                 // Apply reverse feedback if robot drifts past the final point
-                // Profiled paths enter the unified endpoint blend below so the position
-                // controller is sampled exactly once per loop.
                 totalTangentPower = isProfiled ? 0.0 :
                         driveController.calculateEndDistance(signedEndpointError);
             }
 
             if (isProfiled) {
-                // A profile reaches zero target velocity at its endpoint. Depending on odometry
-                // sampling, bestT can remain infinitesimally below 1.0, which previously left a
-                // stopped robot with zero tangential command forever. Blend into position control
-                // over the final few inches so profiled paths always capture the actual endpoint.
                 double endpointPower = driveController.calculateEndDistance(signedEndpointError);
                 totalTangentPower = blendProfiledEndpointPower(
                         totalTangentPower, endpointPower, distanceRemaining);
             }
-            // Quick paths can stall in the same softened-kS deadband. Apply the floor to either
-            // path type only when the robot is stationary near, but still outside, its tolerance.
             totalTangentPower = ensureEndpointBreakawayPower(
                     totalTangentPower,
                     signedEndpointError,
@@ -515,10 +520,6 @@ public class Follower {
             Vector finalDriveOutput = lateralCommand.getRobotCommand()
                     .plus(tangentCommand.getRobotCommand());
 
-            // Closest-point arc length alone is not an endpoint test: once bestT reaches 1.0 it
-            // becomes zero even if the robot is still several inches laterally displaced. Keep
-            // correcting until the complete pose is settled, especially for reverse curves where
-            // endpoint projection can reach t=1 before the chassis reaches the point itself.
             double endpointDistance = currentPos.distanceTo(path.getEndPose().getVec()).getIn();
             double currentAngularVelocity = localizer.getVel().getHeading().getRad();
             if (endpointDistance < Math.max(distanceTol, MIN_COMPLETION_DISTANCE_INCHES) &&
@@ -782,6 +783,9 @@ public class Follower {
      */
     public Pose getVelocity() { return localizer.getVel(); }
 
+    /** Returns the unfiltered localizer velocity for diagnostics and response logging. */
+    public Pose getRawVelocity() { return localizer.getRawVel(); }
+
     /**
      * Retrieves the robots current acceleration estimate from the localizer.
      *
@@ -833,6 +837,13 @@ public class Follower {
     }
 
     public void setCentripetal(double centripetalGain) { this.centripetalGain = centripetalGain; }
+
+    /** Selects whether combined lateral correction or heading receives power first at saturation. */
+    public void setPrioritizeCentripetal(boolean prioritizeCentripetal) {
+        this.prioritizeCentripetal = prioritizeCentripetal;
+    }
+
+    public boolean isPrioritizeCentripetal() { return prioritizeCentripetal; }
 
     /**
      * Builds centripetal power from a principal normal. Because the normal already contains the

@@ -13,6 +13,7 @@ import geometry.DistUnit;
 import geometry.Pose;
 import geometry.Vector;
 import localizers.util.LowPassFilter;
+import localizers.BaseLocalizer;
 
 /**
  * Tunes the feedforward coefficients (kV and kA) for both the angular (heading) and
@@ -212,8 +213,12 @@ public class FeedforwardTuner extends TuningPhase {
         csvError = null;
         autoRunIndex = 0;
         autoStage = AutoStage.PROMPT;
-        commandPowerFilter.setSampleSize(
-                context.getFollower().getLocalizer().getFilterWindowSize());
+        if (usesMovingAverageVelocity()) {
+            commandPowerFilter.setSampleSize(
+                    context.getFollower().getLocalizer().getFilterWindowSize());
+        } else {
+            commandPowerFilter.setSampleSize(1);
+        }
         lastAppliedCharacterizationPower = 0.0;
         timer.reset();
     }
@@ -693,9 +698,9 @@ public class FeedforwardTuner extends TuningPhase {
                 timer.reset();
                 autoStage = AutoStage.SETTLING;
             } else {
-                // Velocity and acceleration are a moving average in BaseLocalizer. Apply the same
-                // filter to the power that produced the current sensor sample so regression inputs
-                // remain time-aligned, especially at the start of a dynamic step.
+                // Preserve the legacy power-window alignment only when the compatibility moving
+                // average is selected. Kalman state estimates are current-time estimates and must
+                // not be shifted by the old seven-sample window.
                 double alignedPower = commandPowerFilter.update(
                         lastAppliedCharacterizationPower).value();
                 double power = run.excitation == Excitation.QUASISTATIC
@@ -757,6 +762,11 @@ public class FeedforwardTuner extends TuningPhase {
         }
         context.getTelemetry().update();
         return false;
+    }
+
+    private boolean usesMovingAverageVelocity() {
+        return context.getFollower().getLocalizer().getVelocityFilterMode()
+                == BaseLocalizer.VelocityFilterMode.MOVING_AVERAGE;
     }
 
     private String feedforwardActionDescription(AutoRun run) {

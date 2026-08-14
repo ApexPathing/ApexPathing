@@ -34,6 +34,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     private final double[] gains = new double[3];
     private final double[] scores = new double[3];
+    private final CandidateResult[] candidateResults = new CandidateResult[3];
 
     private Path forwardPath, backwardPath;
     private Turn forwardTurn, backwardTurn;
@@ -49,6 +50,13 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     private double errorSquared;
     private int errorSamples;
+    private final double[] directionErrorSquared = new double[2];
+    private final int[] directionErrorSamples = new int[2];
+    private final int[] directionSaturatedSamples = new int[2];
+    private final int[] directionTotalSamples = new int[2];
+    private final double[] directionCompletionSeconds = new double[2];
+    private final double[] directionFinalError = new double[2];
+    private final double[] directionOvershoot = new double[2];
     private double lastScore;
     private double translationScore;
     private double angularScore;
@@ -58,7 +66,13 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private int manualTestNumber;
     private TuningCsvWriter manualCsv;
     private String manualCsvPath = "Not started";
+    private TuningCsvWriter responseCsv;
+    private String responseCsvPath = "Not started";
+    private double incumbentGain;
+    private CandidateResult incumbentResult;
+    private String acceptanceMessage = "Pending";
     private final ElapsedTime directionTimer = new ElapsedTime();
+    private final ElapsedTime trialTimer = new ElapsedTime();
 
     public VelocityFeedbackPhase(TunerContext context) { super(context); }
 
@@ -116,13 +130,23 @@ public class VelocityFeedbackPhase extends TuningPhase {
             context.getFollower().stop();
             manualTestRunning = false;
             manualTestNumber = 0;
-            manualCsv = TuningCsvWriter.open("manual_velocity_feedback",
-                    "test", "time_s", "axis", "direction", "gain",
-                    "target_velocity", "actual_velocity", "error");
+            manualCsv = openResponseCsv("manual_velocity_feedback");
+            responseCsv = manualCsv;
             manualCsvPath = manualCsv.getPath();
+            responseCsvPath = manualCsvPath;
         } else {
+            responseCsv = openResponseCsv("automatic_velocity_feedback");
+            responseCsvPath = responseCsv.getPath();
             startSearch(FeedbackAxis.TRANSLATION);
         }
+    }
+
+    private TuningCsvWriter openResponseCsv(String name) {
+        return TuningCsvWriter.open(name,
+                "test", "timestamp_s", "axis", "direction", "gain",
+                "target_velocity", "raw_velocity", "kalman_velocity",
+                "command_power", "displacement", "heading_error", "saturated",
+                "velocity_error", "sample_region");
     }
 
     private void applyCurrentGains() {
@@ -134,9 +158,12 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
     private void startSearch(FeedbackAxis nextAxis) {
         axis = nextAxis;
-        center = (axis == FeedbackAxis.TRANSLATION) ? context.constants.velocityFeedbackGain :
+        incumbentGain = (axis == FeedbackAxis.TRANSLATION) ?
+                context.constants.velocityFeedbackGain :
                 Math.min(context.constants.angularVelocityFeedbackGain,
                         MAX_ANGULAR_FEEDBACK_GAIN);
+        center = incumbentGain;
+        incumbentResult = null;
         double feedforward = (axis == FeedbackAxis.TRANSLATION) ?
                 context.constants.translationalKV : context.constants.angularKV;
 
@@ -148,9 +175,16 @@ public class VelocityFeedbackPhase extends TuningPhase {
     }
 
     private void startRound() {
-        gains[0] = Math.max(0.0, center - step);
-        gains[1] = center;
-        gains[2] = center + step;
+        if (round == 0) {
+            // Always establish a zero-gain control and repeat the incumbent before exploring.
+            gains[0] = 0.0;
+            gains[1] = incumbentGain;
+            gains[2] = incumbentGain + step;
+        } else {
+            gains[0] = Math.max(0.0, center - step);
+            gains[1] = center;
+            gains[2] = center + step;
+        }
         if (axis == FeedbackAxis.ANGULAR) {
             for (int i = 0; i < gains.length; i++) {
                 gains[i] = Math.min(gains[i], MAX_ANGULAR_FEEDBACK_GAIN);
@@ -174,6 +208,15 @@ public class VelocityFeedbackPhase extends TuningPhase {
         forwardIsRunning = true;
         errorSquared = 0.0;
         errorSamples = 0;
+        for (int i = 0; i < 2; i++) {
+            directionErrorSquared[i] = 0.0;
+            directionErrorSamples[i] = 0;
+            directionSaturatedSamples[i] = 0;
+            directionTotalSamples[i] = 0;
+            directionCompletionSeconds[i] = 0.0;
+            directionFinalError[i] = 0.0;
+            directionOvershoot[i] = 0.0;
+        }
 
         if (axis == FeedbackAxis.TRANSLATION) {
             currentMovement = forwardPath;
@@ -183,10 +226,18 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
         context.getFollower().follow(currentMovement);
         directionTimer.reset();
+        trialTimer.reset();
     }
 
     private void sampleTest() {
         if (!context.getFollower().isBusy()) { return; }
+
+        double targetVelocity;
+        double rawVelocity;
+        double kalmanVelocity;
+        double displacement;
+        double headingError;
+        boolean centralSample;
 
         if (axis == FeedbackAxis.TRANSLATION) {
             Path path = (Path) currentMovement;
@@ -202,12 +253,14 @@ public class VelocityFeedbackPhase extends TuningPhase {
             Vector tangent = segment.getFirstDerivative(t).normalize();
 
             // X is forward, Y is sideways layout works perfectly with this dot product
-            double actual = context.getFollower().getVelocity().getVec().dot(tangent).getIn();
-            if (isUsableTranslationSample(
-                    desired.getTangentialVel(), traveled, segment.getLengthIn())) {
-                addError(desired.getTangentialVel(), actual, 1.0);
-                logManualSample(desired.getTangentialVel(), actual);
-            }
+            targetVelocity = desired.getTangentialVel();
+            rawVelocity = context.getFollower().getRawVelocity().getVec().dot(tangent).getIn();
+            kalmanVelocity = context.getFollower().getVelocity().getVec().dot(tangent).getIn();
+            displacement = traveled;
+            headingError = context.getFollower().getPose().getHeading().getShortestAngleTo(
+                    path.getEndPose().getHeading()).getRad();
+            centralSample = isUsableTranslationSample(
+                    targetVelocity, traveled, segment.getLengthIn());
         } else {
             Turn turn = (Turn) currentMovement;
             double traveled = turnProfileProgress(
@@ -215,29 +268,75 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
             MotionParameters desired = turn.getFeedforwardLut()
                     .getFFParams(traveled);
-            double actual = context.getFollower().getVelocity().getHeading().getRad();
-            addError(desired.getAngularVel(), actual, 0.05);
-            logManualSample(desired.getAngularVel(), actual);
+            targetVelocity = desired.getAngularVel();
+            rawVelocity = context.getFollower().getRawVelocity().getHeading().getRad();
+            kalmanVelocity = context.getFollower().getVelocity().getHeading().getRad();
+            displacement = traveled;
+            headingError = context.getFollower().getPose().getHeading().getShortestAngleTo(
+                    turn.getEndPose().getHeading()).getRad();
+            centralSample = Math.abs(targetVelocity) > 0.05
+                    && traveled >= Math.abs(turn.getStartPose().getHeading()
+                    .getShortestAngleTo(turn.getEndPose().getHeading()).getRad())
+                    * SAMPLE_EDGE_FRACTION
+                    && traveled <= Math.abs(turn.getStartPose().getHeading()
+                    .getShortestAngleTo(turn.getEndPose().getHeading()).getRad())
+                    * (1.0 - SAMPLE_EDGE_FRACTION);
+
+            double signedSweep = turn.getStartPose().getHeading()
+                    .getShortestAngleTo(turn.getEndPose().getHeading()).getRad();
+            double signedTravel = turn.getStartPose().getHeading()
+                    .getShortestAngleTo(context.getFollower().getPose().getHeading()).getRad()
+                    * Math.signum(signedSweep);
+            int directionIndex = forwardIsRunning ? 0 : 1;
+            directionOvershoot[directionIndex] = Math.max(directionOvershoot[directionIndex],
+                    Math.max(0.0, signedTravel - Math.abs(signedSweep)));
         }
+
+
+        double commandPower = currentCommandPower();
+        boolean saturated = commandPower >= 0.98;
+        int directionIndex = forwardIsRunning ? 0 : 1;
+        directionTotalSamples[directionIndex]++;
+        if (saturated) { directionSaturatedSamples[directionIndex]++; }
+        if (centralSample) {
+            addError(targetVelocity, kalmanVelocity, directionIndex);
+        }
+        logResponseSample(targetVelocity, rawVelocity, kalmanVelocity, commandPower,
+                displacement, headingError, saturated, centralSample);
     }
 
-    private void logManualSample(double target, double actual) {
-        if (!manualMode || !manualTestRunning || manualCsv == null) { return; }
+    private void logResponseSample(double target, double raw, double kalman,
+                                   double commandPower, double displacement,
+                                   double headingError, boolean saturated,
+                                   boolean centralSample) {
+        if (responseCsv == null || (manualMode && !manualTestRunning)) { return; }
         double gain = axis == FeedbackAxis.TRANSLATION
                 ? context.constants.velocityFeedbackGain
                 : context.constants.angularVelocityFeedbackGain;
-        manualCsv.writeRow(manualTestNumber, directionTimer.seconds(), axis,
+        responseCsv.writeRow(manualMode ? manualTestNumber : round * gains.length + candidate + 1,
+                trialTimer.seconds(), axis,
                 forwardIsRunning ? "OUTBOUND" : "RETURN", gain,
-                target, actual, target - actual);
+                target, raw, kalman, commandPower, displacement, headingError, saturated,
+                target - kalman, centralSample ? "CENTRAL_PROFILE" : "ENDPOINT_SETTLING");
     }
 
-    private void addError(double target, double actual, double minimumTarget) {
-        if (Double.isFinite(target) && Double.isFinite(actual) &&
-                Math.abs(target) > minimumTarget) {
+    private void addError(double target, double actual, int directionIndex) {
+        if (Double.isFinite(target) && Double.isFinite(actual)) {
             double error = target - actual;
             errorSquared += error * error;
             errorSamples++;
+            directionErrorSquared[directionIndex] += error * error;
+            directionErrorSamples[directionIndex]++;
         }
+    }
+
+    private double currentCommandPower() {
+        return Math.max(Math.max(
+                        Math.abs(context.getFollower().getDrivetrain().getLastFlPower()),
+                        Math.abs(context.getFollower().getDrivetrain().getLastFrPower())),
+                Math.max(
+                        Math.abs(context.getFollower().getDrivetrain().getLastBlPower()),
+                        Math.abs(context.getFollower().getDrivetrain().getLastBrPower())));
     }
 
     private boolean updateTest() {
@@ -256,6 +355,8 @@ public class VelocityFeedbackPhase extends TuningPhase {
                             ". Verify localization, feedforward, and PDS constants."
             );
         }
+
+        finishDirectionMetrics(forwardIsRunning ? 0 : 1);
 
         if (forwardIsRunning) {
             forwardIsRunning = false;
@@ -277,8 +378,29 @@ public class VelocityFeedbackPhase extends TuningPhase {
                             " samples. Verify feedforward constants and localization."
             );
         }
-        lastScore = Math.sqrt(errorSquared / errorSamples);
+        candidateResults[candidate] = CandidateResult.from(
+                directionErrorSquared, directionErrorSamples,
+                directionFinalError, directionOvershoot,
+                directionCompletionSeconds, directionSaturatedSamples,
+                directionTotalSamples);
+        lastScore = candidateResults[candidate].centralRms;
+        if (round == 0 && candidate == 1) {
+            incumbentResult = candidateResults[candidate];
+        }
         return true;
+    }
+
+    private void finishDirectionMetrics(int directionIndex) {
+        directionCompletionSeconds[directionIndex] = directionTimer.seconds();
+        if (axis == FeedbackAxis.TRANSLATION) {
+            Path path = (Path) currentMovement;
+            directionFinalError[directionIndex] = context.getFollower().getPose()
+                    .distanceTo(path.getEndPose()).getIn();
+        } else {
+            Turn turn = (Turn) currentMovement;
+            directionFinalError[directionIndex] = Math.abs(context.getFollower().getPose()
+                    .getHeading().getShortestAngleTo(turn.getEndPose().getHeading()).getRad());
+        }
     }
 
     static double turnProfileProgress(Turn turn, Angle currentHeading) {
@@ -295,7 +417,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
         reportAutomaticProgress();
         if (!updateTest()) { return false; }
 
-        scores[candidate] = lastScore;
+        scores[candidate] = candidateResults[candidate].outboundRms;
         candidate++;
         if (candidate < gains.length) {
             startCandidate();
@@ -308,6 +430,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
         }
 
         center = gains[best];
+        CandidateResult bestResult = candidateResults[best];
 
         round++;
         if (round < SEARCH_ROUNDS) {
@@ -317,17 +440,50 @@ public class VelocityFeedbackPhase extends TuningPhase {
         }
 
         if (axis == FeedbackAxis.TRANSLATION) {
-            translationScore = scores[best];
-            context.constants.velocityFeedbackGain = center;
+            boolean accepted = acceptsCandidate(incumbentResult, bestResult);
+            context.constants.velocityFeedbackGain = accepted ? center : incumbentGain;
+            translationScore = accepted ? bestResult.centralRms : incumbentResult.centralRms;
+            acceptanceMessage = "Translation " + (accepted ? "accepted" : "retained incumbent")
+                    + acceptanceDetails(incumbentResult, bestResult)
+                    + (accepted ? "" : "; run manual validation");
             applyCurrentGains();
             startSearch(FeedbackAxis.ANGULAR);
             return false;
         }
 
         // If we are here, we have finished tuning both axes
-        angularScore = scores[best];
-        context.constants.angularVelocityFeedbackGain = center;
+        boolean accepted = acceptsCandidate(incumbentResult, bestResult);
+        context.constants.angularVelocityFeedbackGain = accepted ? center : incumbentGain;
+        angularScore = accepted ? bestResult.centralRms : incumbentResult.centralRms;
+        acceptanceMessage += "; Angular " +
+                (accepted ? "accepted" : "retained incumbent")
+                + acceptanceDetails(incumbentResult, bestResult)
+                + (accepted ? "" : "; run manual validation");
+        applyCurrentGains();
+        if (responseCsv != null) { responseCsv.close(); }
         return true;
+    }
+
+    static boolean acceptsCandidate(CandidateResult incumbent, CandidateResult candidate) {
+        if (incumbent == null || candidate == null ||
+                !Double.isFinite(incumbent.returnRms) ||
+                !Double.isFinite(candidate.returnRms)) {
+            return false;
+        }
+        boolean heldOutImprovement = candidate.returnRms <= incumbent.returnRms * 0.95;
+        boolean directionallyConsistent = candidate.directionDifferenceRatio() <= 0.20;
+        boolean notSaturationDependent = candidate.saturationRate <=
+                Math.min(0.10, Math.max(0.02, incumbent.saturationRate + 0.02));
+        return heldOutImprovement && directionallyConsistent && notSaturationDependent;
+    }
+
+    private String acceptanceDetails(CandidateResult incumbent, CandidateResult candidate) {
+        if (incumbent == null || candidate == null) { return " (insufficient validation)"; }
+        return String.format(java.util.Locale.US,
+                " (held-out %.4f -> %.4f, direction gap %.1f%%, saturation %.1f%%)",
+                incumbent.returnRms, candidate.returnRms,
+                candidate.directionDifferenceRatio() * 100.0,
+                candidate.saturationRate * 100.0);
     }
 
     private void reportAutomaticProgress() {
@@ -351,6 +507,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
                         (2 * SEARCH_ROUNDS * gains.length));
         context.getTelemetry().addData("Usable samples", errorSamples);
         context.getTelemetry().addData("Last RMS score", lastScore);
+        context.getTelemetry().addData("Response CSV", responseCsvPath);
         context.getTelemetry().update();
     }
 
@@ -441,6 +598,8 @@ public class VelocityFeedbackPhase extends TuningPhase {
                 number(context.constants.angularVelocityFeedbackGain));
         context.getTelemetry().addData("Translation root mean square error", number(translationScore));
         context.getTelemetry().addData("Angular root mean square error", number(angularScore));
+        context.getTelemetry().addData("Validation", acceptanceMessage);
+        context.getTelemetry().addData("Response CSV", responseCsvPath);
     }
 
     private void restartManualTest() {
@@ -459,5 +618,49 @@ public class VelocityFeedbackPhase extends TuningPhase {
         double fraction = traveled / pathLength;
         return Math.abs(targetVelocity) > 1.0 && fraction >= SAMPLE_EDGE_FRACTION &&
                 fraction <= 1.0 - SAMPLE_EDGE_FRACTION;
+    }
+
+    /** Keeps profile tracking separate from endpoint, settling-time, and saturation evidence. */
+    static final class CandidateResult {
+        final double outboundRms;
+        final double returnRms;
+        final double centralRms;
+        final double endpointError;
+        final double overshoot;
+        final double completionSeconds;
+        final double saturationRate;
+
+        CandidateResult(double outboundRms, double returnRms, double endpointError,
+                        double overshoot, double completionSeconds, double saturationRate) {
+            this.outboundRms = outboundRms;
+            this.returnRms = returnRms;
+            this.centralRms = (outboundRms + returnRms) / 2.0;
+            this.endpointError = endpointError;
+            this.overshoot = overshoot;
+            this.completionSeconds = completionSeconds;
+            this.saturationRate = saturationRate;
+        }
+
+        static CandidateResult from(double[] squaredError, int[] samples,
+                                    double[] finalError, double[] overshoot,
+                                    double[] completion, int[] saturated, int[] total) {
+            double outbound = samples[0] == 0 ? Double.POSITIVE_INFINITY
+                    : Math.sqrt(squaredError[0] / samples[0]);
+            double returning = samples[1] == 0 ? Double.POSITIVE_INFINITY
+                    : Math.sqrt(squaredError[1] / samples[1]);
+            int totalSamples = total[0] + total[1];
+            return new CandidateResult(outbound, returning,
+                    (finalError[0] + finalError[1]) / 2.0,
+                    Math.max(overshoot[0], overshoot[1]),
+                    completion[0] + completion[1],
+                    totalSamples == 0 ? 1.0
+                            : (double) (saturated[0] + saturated[1]) / totalSamples);
+        }
+
+        double directionDifferenceRatio() {
+            double scale = Math.max(Math.abs(outboundRms), Math.abs(returnRms));
+            if (!Double.isFinite(scale) || scale <= 1e-12) { return 0.0; }
+            return Math.abs(outboundRms - returnRms) / scale;
+        }
     }
 }

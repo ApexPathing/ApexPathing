@@ -10,7 +10,7 @@ package geometry;
  * @author DrPixelCat - 7842 alum
  */
 public class PathSegment {
-    private static final double POINTS_PER_INCH = 0.5;
+    private static final double POINTS_PER_INCH = 0.75;
 
     private final ParametricSegment segment;
     private final double length;
