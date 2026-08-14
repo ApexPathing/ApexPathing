@@ -4,13 +4,11 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 import drivetrains.BaseDrivetrain;
 
-/** Compact scalar-response recorder shared by the manual position-controller tests. */
+/** Compact scalar-response metrics shared by the manual position-controller trials. */
 final class ManualResponseMetrics {
     private static final double SETTLE_HOLD_SECONDS = 0.25;
 
     private final ElapsedTime timer = new ElapsedTime();
-    private TuningCsvWriter csv;
-    private String csvPath = "Not started";
     private boolean active;
     private double start;
     private double target;
@@ -27,12 +25,8 @@ final class ManualResponseMetrics {
     private int samples;
     private int saturatedSamples;
 
-    void begin(String prefix, double start, double target,
+    void begin(double start, double target,
                double positionTolerance, double velocityTolerance) {
-        close();
-        csv = TuningCsvWriter.open(prefix,
-                "time_s", "target", "position", "error", "velocity", "max_motor_power");
-        csvPath = csv.getPath();
         this.start = start;
         this.target = target;
         this.positionTolerance = positionTolerance;
@@ -76,22 +70,11 @@ final class ManualResponseMetrics {
         } else {
             settledSince = -1.0;
         }
-        if (csv != null) {
-            csv.writeRow(elapsed, target, position, error, velocity, maxMotorPower);
-        }
         lastTime = elapsed;
     }
 
     void finish() {
         active = false;
-        close();
-    }
-
-    void close() {
-        if (csv != null) {
-            csv.close();
-            csv = null;
-        }
     }
 
     boolean isActive() { return active; }
@@ -106,8 +89,6 @@ final class ManualResponseMetrics {
     double getSaturationFraction() {
         return samples == 0 ? 0.0 : (double) saturatedSamples / samples;
     }
-    String getCsvPath() { return csvPath; }
-
     static double maxMotorPower(BaseDrivetrain<?> drivetrain) {
         return Math.max(Math.max(Math.abs(drivetrain.getLastFlPower()),
                         Math.abs(drivetrain.getLastFrPower())),

@@ -783,9 +783,6 @@ public class Follower {
      */
     public Pose getVelocity() { return localizer.getVel(); }
 
-    /** Returns the unfiltered localizer velocity for diagnostics and response logging. */
-    public Pose getRawVelocity() { return localizer.getRawVel(); }
-
     /**
      * Retrieves the robots current acceleration estimate from the localizer.
      *

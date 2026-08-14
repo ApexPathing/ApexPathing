@@ -1,11 +1,5 @@
 package feedforward.generators;
 
-import androidx.annotation.NonNull;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-
 import core.FollowerConstants;
 import feedforward.FFLut;
 import feedforward.MotionParameters;
@@ -39,15 +33,11 @@ public abstract class BaseProfileGenerator {
 
     protected final FollowerConstants constants;
     protected final FollowerMovement path;
-    private DebugReport lastReport;
 
     protected BaseProfileGenerator(FollowerConstants constants, FollowerMovement path) {
         this.constants = constants;
         this.path = path;
     }
-
-    /** @return diagnostics from the last call to {@link #generate()} */
-    public DebugReport getLastDebugReport() { return lastReport; }
 
     // region Abstract Methods
 
@@ -105,8 +95,6 @@ public abstract class BaseProfileGenerator {
             throw new IllegalStateException("Points must be set before generating.");
         }
 
-        lastReport = new DebugReport();
-
         // Start with each point's local velocity ceiling, then enforce reachability both ways.
         MotionParameters[] outputParams = generateBasePass(points, path);
         runBackwardPass(outputParams, points, path);
@@ -136,28 +124,11 @@ public abstract class BaseProfileGenerator {
 
             outputParams[pinIndex].setTangentialVel(Math.max(0.0, pinnedVelocity));
 
-            IterationLog log = new IterationLog();
-            log.iteration = iterations + 1;
-            log.pinnedIndex = pinIndex;
-            log.previousVelocity = previousVelocity;
-            log.newVelocity = outputParams[pinIndex].getTangentialVel();
-            log.maxUtilization = profileEval.maxUtilization;
-            log.totalPower = profileEval.totalPower;
-            log.pForward = profileEval.pForward;
-            log.pLateral = profileEval.pLateral;
-            log.pHeading = profileEval.pHeading;
-            lastReport.logs.add(log);
-
             runBackwardPass(outputParams, points, path);
             runForwardPass(outputParams, points, path);
             profileEval = populateKinematicsAndPower(outputParams, points, path);
             iterations++;
         }
-
-        lastReport.iterationsRun = Math.max(1, iterations + 1);
-        lastReport.finalMaxUtilization = profileEval.maxUtilization;
-        lastReport.converged =
-                profileEval.maxUtilization <= UTILIZATION_LIMIT + UTILIZATION_TOLERANCE;
 
         return outputParams;
     }
@@ -670,7 +641,7 @@ public abstract class BaseProfileGenerator {
         return 0.0;
     }
 
-    // region Logging and CSV Export
+    // region Evaluation results
 
     /**
      * Output container for one drivetrain power evaluation.
@@ -693,33 +664,6 @@ public abstract class BaseProfileGenerator {
             this.pLateral = other.pLateral;
             this.pHeading = other.pHeading;
         }
-    }
-
-    /** Summary of the iterative pinning phase from a generated profile. */
-    public static class DebugReport {
-        public int iterationsRun = 0;
-        public boolean converged = false;
-        public double finalMaxUtilization = 0.0;
-        public List<IterationLog> logs = new ArrayList<IterationLog>();
-
-        @Override
-        @NonNull
-        public String toString() {
-            return String.format(
-                    Locale.ENGLISH,
-                    "Converged: %b | Iterations: %d | Final Max Util: %.3f",
-                    converged, iterationsRun, finalMaxUtilization
-            );
-        }
-    }
-
-    /** One iteration of the pinning loop. */
-    public static class IterationLog {
-        public int iteration;
-        public int pinnedIndex;
-        public double previousVelocity, newVelocity;
-        public double maxUtilization, totalPower;
-        public double pForward, pLateral, pHeading;
     }
 
     /** Internal aggregate used to find the worst point in the current profile. */

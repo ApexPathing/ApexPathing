@@ -117,7 +117,6 @@ public class PDSRoutine {
     private boolean testActive;
     private int completedTestCount;
     private String operatorCheckSummary = "Not started";
-    private TuningCsvWriter csv;
 
     // Optimizer state accumulated across evaluations and iterations.
     private Evaluation evaluation;
@@ -172,7 +171,6 @@ public class PDSRoutine {
     }
 
     void start(TunerContext context) {
-        if (csv != null) { csv.close(); }
         search = new BinarySearch(0.0, MAX_STATIC_FRICTION_SEARCH_POWER, 0.01);
         context.getFollower().disableControllers();
         resetAxisPose(context);
@@ -187,12 +185,6 @@ public class PDSRoutine {
         completedTestCount = 0;
         operatorCheckSummary = "Pending PD optimization";
         automaticTuneSummary = "Waiting for static-friction measurement";
-        csv = TuningCsvWriter.open(
-                "pds_" + axis.toString().toLowerCase(),
-                "time_s", "axis", "state", "iteration", "evaluation", "repeat",
-                "target", "position", "error", "velocity", "command", "kp", "kd", "ks",
-                "trial_cost", "error_zero_crossings", "saturation_fraction", "trial_status"
-        );
     }
 
     private void resetAxisPose(TunerContext context) {
@@ -276,7 +268,6 @@ public class PDSRoutine {
             abort(context, "Static-friction test produced a non-finite position");
         }
         double movement = Math.abs(position);
-        logSample(context, 0.0, position, command);
 
         boolean moved = movement > threshold;
         if (!moved && timer.milliseconds() < GUESS_TIME_MS) { return false; }
@@ -296,7 +287,6 @@ public class PDSRoutine {
     /** Returns true on the loop where the requested next state is entered. */
     private boolean settle(TunerContext context, PDSState nextState) {
         context.getFollower().stop();
-        logSample(context, 0.0, getRelativePosition(context), 0.0);
         double requiredMs = nextState == PDSState.TUNING_PD
                 ? PD_SETTLING_TIME_MS : SETTLING_TIME_MS;
         if (timer.milliseconds() < requiredMs) { return false; }
@@ -480,7 +470,6 @@ public class PDSRoutine {
         }
 
         move(context, command);
-        logSample(context, testTarget, position, command);
 
         boolean withinTolerance = Math.abs(error) <= errorTolerance &&
                 Math.abs(velocity) <= velocityTolerance;
@@ -764,7 +753,6 @@ public class PDSRoutine {
     private boolean updateOperatorCheck(TunerContext context) {
         if (!testActive) {
             context.getFollower().stop();
-            logSample(context, testTarget, getRelativePosition(context), 0.0);
 
             if (context.testButtonWasPressed()) {
                 testTarget = nextTestTarget;
@@ -784,7 +772,6 @@ public class PDSRoutine {
             }
             if (context.acceptButtonWasPressed()) {
                 operatorCheckSummary = "Gains accepted by operator";
-                if (csv != null) { csv.close(); }
                 return true;
             }
             return false;
@@ -806,7 +793,6 @@ public class PDSRoutine {
 
         move(context, command);
         testFinalError = error;
-        logSample(context, testTarget, position, command);
 
         boolean withinTolerance = Math.abs(error) <= errorTolerance() &&
                 Math.abs(velocity) <= velocityTolerance();
@@ -982,27 +968,12 @@ public class PDSRoutine {
 
     // endregion
 
-    // region Failure handling, logging, and telemetry
+    // region Failure handling and telemetry
 
     private void abort(TunerContext context, String reason) {
         context.getFollower().stop();
         operatorCheckSummary = "FAILED: " + reason;
-        if (csv != null) { csv.close(); }
-        throw new IllegalStateException(reason + ". See PDS CSV: " + getCsvPath());
-    }
-
-    private void logSample(TunerContext context, double target, double position, double command) {
-        if (csv == null) { return; }
-        double elapsed = state == PDSState.TUNING_PD ? timer.seconds() : 0.0;
-        csv.writeRow(
-                sessionTimer.seconds(), axis, state, iteration,
-                evaluation == null ? "" : evaluation,
-                evaluation == null ? "" : trialRepeat + 1,
-                target, position, target - position, getAxisVelocity(context), command,
-                controller.getCoefficients().kP, controller.getCoefficients().kD,
-                controller.getCoefficients().kS, trialCost, errorZeroCrossings,
-                saturationFraction(elapsed), trialBadReason == null ? "OK" : trialBadReason
-        );
+        throw new IllegalStateException(reason);
     }
 
     private static String percent(double fraction) {
@@ -1051,7 +1022,6 @@ public class PDSRoutine {
             context.getTelemetry().addData("Operator tests completed", completedTestCount);
             context.getTelemetry().addData("Current test error", testFinalError);
         }
-        context.getTelemetry().addData("CSV", getCsvPath());
         context.getTelemetry().addLine(state == PDSState.OPERATOR_CHECK
                 ? "The robot remains stopped until you request or accept a test."
                 : "Keep the OpMode running until automatic tuning finishes.");
@@ -1097,8 +1067,6 @@ public class PDSRoutine {
     PDSCoefficients getCoefficients() { return controller.getCoefficients(); }
 
     String getOperatorCheckSummary() { return operatorCheckSummary; }
-
-    String getCsvPath() { return csv == null ? "Unavailable" : csv.getPath(); }
 
     // endregion
 }

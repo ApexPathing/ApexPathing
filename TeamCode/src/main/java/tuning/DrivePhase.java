@@ -126,7 +126,7 @@ public class DrivePhase extends TuningPhase {
         if (testPathQueued && !context.getFollower().isBusy()) {
             activeTestTarget = target;
             double start = context.getFollower().getPose().getX().getIn();
-            manualMetrics.begin("manual_drive_response", start, start + target, 0.75, 1.0);
+            manualMetrics.begin(start, start + target, 0.75, 1.0);
             context.getFollower().follow(testPath.get());
             target = -target;
             testPathQueued = false;
@@ -164,7 +164,6 @@ public class DrivePhase extends TuningPhase {
         if (!manualMode && context.isDebugMode()) {
             context.getTelemetry().addData("Operator check",
                     routine.getOperatorCheckSummary());
-            context.getTelemetry().addData("PDS response CSV", routine.getCsvPath());
         }
     }
 
@@ -179,6 +178,5 @@ public class DrivePhase extends TuningPhase {
                 manualMetrics.getPeakVelocity() + " in/s");
         context.getTelemetry().addData("Saturation", Math.round(
                 manualMetrics.getSaturationFraction() * 1000.0) / 10.0 + "%");
-        context.getTelemetry().addData("Response CSV", manualMetrics.getCsvPath());
     }
 }

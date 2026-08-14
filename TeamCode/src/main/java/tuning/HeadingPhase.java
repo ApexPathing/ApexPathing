@@ -127,7 +127,7 @@ public class HeadingPhase extends TuningPhase {
                     .quickBuild();
             double start = manualHeadingOrigin.getShortestAngleTo(
                     context.getFollower().getPose().getHeading()).getRad();
-            manualMetrics.begin("manual_heading_response", start,
+            manualMetrics.begin(start,
                     Math.toRadians(activeTestTarget), Math.toRadians(2.5), 0.10);
             context.getFollower().follow(testTurn);
             nextTestTarget = nextManualTestTarget(activeTestTarget);
@@ -166,7 +166,6 @@ public class HeadingPhase extends TuningPhase {
         if (!manualMode && context.isDebugMode()) {
             context.getTelemetry().addData("Operator check",
                     routine.getOperatorCheckSummary());
-            context.getTelemetry().addData("PDS response CSV", routine.getCsvPath());
         }
     }
 
@@ -183,7 +182,6 @@ public class HeadingPhase extends TuningPhase {
                 manualMetrics.getPeakVelocity() + " " + velocityUnit);
         context.getTelemetry().addData("Saturation", Math.round(
                 manualMetrics.getSaturationFraction() * 1000.0) / 10.0 + "%");
-        context.getTelemetry().addData("Response CSV", manualMetrics.getCsvPath());
     }
 
     static double nextManualTestTarget(double completedTargetDegrees) {

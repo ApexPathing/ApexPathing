@@ -63,11 +63,6 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private double bestTranslationScore = Double.POSITIVE_INFINITY;
     private double bestAngularScore = Double.POSITIVE_INFINITY;
     private boolean manualTestRunning;
-    private int manualTestNumber;
-    private TuningCsvWriter manualCsv;
-    private String manualCsvPath = "Not started";
-    private TuningCsvWriter responseCsv;
-    private String responseCsvPath = "Not started";
     private double incumbentGain;
     private CandidateResult incumbentResult;
     private String acceptanceMessage = "Pending";
@@ -129,24 +124,9 @@ public class VelocityFeedbackPhase extends TuningPhase {
         if (manualMode) {
             context.getFollower().stop();
             manualTestRunning = false;
-            manualTestNumber = 0;
-            manualCsv = openResponseCsv("manual_velocity_feedback");
-            responseCsv = manualCsv;
-            manualCsvPath = manualCsv.getPath();
-            responseCsvPath = manualCsvPath;
         } else {
-            responseCsv = openResponseCsv("automatic_velocity_feedback");
-            responseCsvPath = responseCsv.getPath();
             startSearch(FeedbackAxis.TRANSLATION);
         }
-    }
-
-    private TuningCsvWriter openResponseCsv(String name) {
-        return TuningCsvWriter.open(name,
-                "test", "timestamp_s", "axis", "direction", "gain",
-                "target_velocity", "raw_velocity", "kalman_velocity",
-                "command_power", "displacement", "heading_error", "saturated",
-                "velocity_error", "sample_region");
     }
 
     private void applyCurrentGains() {
@@ -233,10 +213,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
         if (!context.getFollower().isBusy()) { return; }
 
         double targetVelocity;
-        double rawVelocity;
         double kalmanVelocity;
-        double displacement;
-        double headingError;
         boolean centralSample;
 
         if (axis == FeedbackAxis.TRANSLATION) {
@@ -254,11 +231,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
             // X is forward, Y is sideways layout works perfectly with this dot product
             targetVelocity = desired.getTangentialVel();
-            rawVelocity = context.getFollower().getRawVelocity().getVec().dot(tangent).getIn();
             kalmanVelocity = context.getFollower().getVelocity().getVec().dot(tangent).getIn();
-            displacement = traveled;
-            headingError = context.getFollower().getPose().getHeading().getShortestAngleTo(
-                    path.getEndPose().getHeading()).getRad();
             centralSample = isUsableTranslationSample(
                     targetVelocity, traveled, segment.getLengthIn());
         } else {
@@ -269,11 +242,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
             MotionParameters desired = turn.getFeedforwardLut()
                     .getFFParams(traveled);
             targetVelocity = desired.getAngularVel();
-            rawVelocity = context.getFollower().getRawVelocity().getHeading().getRad();
             kalmanVelocity = context.getFollower().getVelocity().getHeading().getRad();
-            displacement = traveled;
-            headingError = context.getFollower().getPose().getHeading().getShortestAngleTo(
-                    turn.getEndPose().getHeading()).getRad();
             centralSample = Math.abs(targetVelocity) > 0.05
                     && traveled >= Math.abs(turn.getStartPose().getHeading()
                     .getShortestAngleTo(turn.getEndPose().getHeading()).getRad())
@@ -301,23 +270,6 @@ public class VelocityFeedbackPhase extends TuningPhase {
         if (centralSample) {
             addError(targetVelocity, kalmanVelocity, directionIndex);
         }
-        logResponseSample(targetVelocity, rawVelocity, kalmanVelocity, commandPower,
-                displacement, headingError, saturated, centralSample);
-    }
-
-    private void logResponseSample(double target, double raw, double kalman,
-                                   double commandPower, double displacement,
-                                   double headingError, boolean saturated,
-                                   boolean centralSample) {
-        if (responseCsv == null || (manualMode && !manualTestRunning)) { return; }
-        double gain = axis == FeedbackAxis.TRANSLATION
-                ? context.constants.velocityFeedbackGain
-                : context.constants.angularVelocityFeedbackGain;
-        responseCsv.writeRow(manualMode ? manualTestNumber : round * gains.length + candidate + 1,
-                trialTimer.seconds(), axis,
-                forwardIsRunning ? "OUTBOUND" : "RETURN", gain,
-                target, raw, kalman, commandPower, displacement, headingError, saturated,
-                target - kalman, centralSample ? "CENTRAL_PROFILE" : "ENDPOINT_SETTLING");
     }
 
     private void addError(double target, double actual, int directionIndex) {
@@ -460,7 +412,6 @@ public class VelocityFeedbackPhase extends TuningPhase {
                 + acceptanceDetails(incumbentResult, bestResult)
                 + (accepted ? "" : "; run manual validation");
         applyCurrentGains();
-        if (responseCsv != null) { responseCsv.close(); }
         return true;
     }
 
@@ -507,7 +458,6 @@ public class VelocityFeedbackPhase extends TuningPhase {
                         (2 * SEARCH_ROUNDS * gains.length));
         context.getTelemetry().addData("Usable samples", errorSamples);
         context.getTelemetry().addData("Last RMS score", lastScore);
-        context.getTelemetry().addData("Response CSV", responseCsvPath);
         context.getTelemetry().update();
     }
 
@@ -572,7 +522,6 @@ public class VelocityFeedbackPhase extends TuningPhase {
                     ? Double.NaN : Math.sqrt(errorSquared / errorSamples));
             context.getTelemetry().addData("Best translation RMS", bestTranslationScore);
             context.getTelemetry().addData("Best angular RMS", bestAngularScore);
-            context.getTelemetry().addData("Response CSV", manualCsvPath);
         }
         context.getTelemetry().addLine("Dpad Up/Down: change value");
         context.getTelemetry().addLine("LB/RB: select value");
@@ -583,7 +532,6 @@ public class VelocityFeedbackPhase extends TuningPhase {
         if (opMode.gamepad1.aWasPressed()) {
             context.getFollower().stop();
             manualTestRunning = false;
-            if (manualCsv != null) { manualCsv.close(); }
             return true;
         }
 
@@ -599,12 +547,10 @@ public class VelocityFeedbackPhase extends TuningPhase {
         context.getTelemetry().addData("Translation root mean square error", number(translationScore));
         context.getTelemetry().addData("Angular root mean square error", number(angularScore));
         context.getTelemetry().addData("Validation", acceptanceMessage);
-        context.getTelemetry().addData("Response CSV", responseCsvPath);
     }
 
     private void restartManualTest() {
         context.getFollower().stop();
-        manualTestNumber++;
         startTest();
         manualTestRunning = true;
     }

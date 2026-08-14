@@ -128,20 +128,15 @@ public class FeedforwardTuner extends TuningPhase {
     private FitResult angularFit;
     private FitResult translationalFit;
     private String validationMessage = "Not run";
-    private String csvPath = "Not written";
-    private String csvError;
     private boolean isForward = true;
     private boolean manualDriveHasRun = false;
     private boolean manualAngularPositive = true;
     private boolean manualAngularHasRun = false;
-    private int manualRunNumber;
     private int manualSamples;
     private int manualSaturatedSamples;
     private double manualErrorSquared;
     private double manualPeakError;
     private double manualPeakVelocity;
-    private TuningCsvWriter manualCsv;
-    private String manualCsvPath = "Not started";
     private final LowPassFilter commandPowerFilter = new LowPassFilter();
     private double lastAppliedCharacterizationPower;
 
@@ -192,11 +187,6 @@ public class FeedforwardTuner extends TuningPhase {
         if (manualMode) {
             manualState = ManualState.IDLE;
             context.getFollower().stop();
-            manualRunNumber = 0;
-            manualCsv = TuningCsvWriter.open("manual_feedforward_response",
-                    "run", "time_s", "axis", "direction", "target_velocity",
-                    "actual_velocity", "error", "raw_power", "applied_power", "saturated");
-            manualCsvPath = manualCsv.getPath();
         } else {
             restartAutomaticCharacterization();
         }
@@ -209,8 +199,6 @@ public class FeedforwardTuner extends TuningPhase {
         angularFit = null;
         translationalFit = null;
         validationMessage = "Collecting characterization data";
-        csvPath = "Pending";
-        csvError = null;
         autoRunIndex = 0;
         autoStage = AutoStage.PROMPT;
         if (usesMovingAverageVelocity()) {
@@ -546,7 +534,6 @@ public class FeedforwardTuner extends TuningPhase {
             context.getTelemetry().addData("Peak measured velocity", manualPeakVelocity);
             context.getTelemetry().addData("Saturation", manualSamples == 0 ? "0.0%" :
                     Math.round(1000.0 * manualSaturatedSamples / manualSamples) / 10.0 + "%");
-            context.getTelemetry().addData("Response CSV", manualCsvPath);
         }
         context.getTelemetry().addLine("Dpad Up/Down: Change value");
         context.getTelemetry().addLine("LB/RB: select Value to tune");
@@ -556,14 +543,12 @@ public class FeedforwardTuner extends TuningPhase {
         context.getTelemetry().update();
         if (opMode.gamepad1.aWasPressed()) {
             context.getFollower().stop();
-            if (manualCsv != null) { manualCsv.close(); }
             return true;
         }
         return false;
     }
 
     private void resetManualMetrics() {
-        manualRunNumber++;
         manualSamples = 0;
         manualSaturatedSamples = 0;
         manualErrorSquared = 0.0;
@@ -581,13 +566,6 @@ public class FeedforwardTuner extends TuningPhase {
         manualPeakVelocity = Math.max(manualPeakVelocity, Math.abs(actualVelocity));
         boolean saturated = Math.abs(rawPower) >= 1.0;
         if (saturated) { manualSaturatedSamples++; }
-        if (manualCsv != null) {
-            String direction = manualState == ManualState.ANGULAR
-                    ? (manualAngularPositive ? "COUNTERCLOCKWISE" : "CLOCKWISE")
-                    : (isForward ? "FORWARD" : "BACKWARD");
-            manualCsv.writeRow(manualRunNumber, timer.seconds(), manualState, direction,
-                    targetVelocity, actualVelocity, error, rawPower, appliedPower, saturated);
-        }
     }
 
     static double manualAngularPower(double kV, double kA, double kS,
@@ -644,7 +622,6 @@ public class FeedforwardTuner extends TuningPhase {
             if (!angularValid || !translationalValid) {
                 validationMessage += "; no candidate values applied";
             }
-            writeCharacterizationCsv();
             autoStage = angularValid && translationalValid ? AutoStage.DONE : AutoStage.FAILED;
             return autoStage == AutoStage.DONE;
         }
@@ -756,7 +733,6 @@ public class FeedforwardTuner extends TuningPhase {
             context.getTelemetry().addData("Direction", run.forward ? "FORWARD / CCW" : "BACKWARD / CW");
             context.getTelemetry().addData("Angular samples", angularObservations.size());
             context.getTelemetry().addData("Translation samples", translationalObservations.size());
-            context.getTelemetry().addData("CSV", csvPath);
         }
         context.getTelemetry().update();
         return false;
@@ -783,7 +759,6 @@ public class FeedforwardTuner extends TuningPhase {
     private void reportFitDiagnostics() {
         reportFitDiagnostics("Angular", angularFit);
         reportFitDiagnostics("Translation", translationalFit);
-        context.getTelemetry().addData("Characterization CSV", csvPath);
     }
 
     private void reportFitDiagnostics(String axis, FitResult fit) {
@@ -799,40 +774,6 @@ public class FeedforwardTuner extends TuningPhase {
         context.getTelemetry().addData(axis + " samples", fit.sampleCount);
     }
 
-    private void writeCharacterizationCsv() {
-        TuningCsvWriter writer = TuningCsvWriter.open(
-                "feedforward_characterization",
-                "axis", "run", "excitation", "direction", "elapsed_s",
-                "commanded_power", "velocity", "acceleration", "predicted_power",
-                "residual", "kS", "kV", "kA"
-        );
-        writeAxisCsv(writer, "ANGULAR", angularObservations,
-                Math.abs(context.constants.angularCoeffs.kS), angularFit);
-        writeAxisCsv(writer, "TRANSLATIONAL", translationalObservations,
-                Math.abs(context.constants.translationalCoeffs.kS), translationalFit);
-        writer.close();
-        csvPath = writer.getPath();
-        csvError = writer.getError();
-    }
-
-    private static void writeAxisCsv(TuningCsvWriter writer, String axis,
-                                     List<Observation> observations, double kS,
-                                     FitResult fit) {
-        for (Observation sample : observations) {
-            String excitation = sample.run < 2 ? "QUASISTATIC" : "DYNAMIC";
-            String direction = sample.run % 2 == 0 ? "POSITIVE" : "NEGATIVE";
-            double predicted = fit == null ? Double.NaN :
-                    kS + fit.kV * sample.velocity + fit.kA * sample.acceleration;
-            writer.writeRow(
-                    axis, sample.run + 1, excitation, direction, sample.elapsedSeconds,
-                    sample.power, sample.velocity, sample.acceleration, predicted,
-                    sample.power - predicted, kS,
-                    fit == null ? Double.NaN : fit.kV,
-                    fit == null ? Double.NaN : fit.kA
-            );
-        }
-    }
-
     @Override
     protected void reportResults() {
         context.getTelemetry().addData("Angular KV", number(context.constants.angularKV));
@@ -840,15 +781,8 @@ public class FeedforwardTuner extends TuningPhase {
         context.getTelemetry().addData("Translational KV", number(context.constants.translationalKV));
         context.getTelemetry().addData("Translational KA", number(context.constants.translationalKA));
         context.getTelemetry().addData("Validation", validationMessage);
-        if (manualMode) {
-            context.getTelemetry().addData("Manual response CSV", manualCsvPath);
-            return;
-        }
+        if (manualMode) { return; }
         if (!context.isDebugMode()) { return; }
-        context.getTelemetry().addData("Characterization CSV", csvPath);
-        if (csvError != null) {
-            context.getTelemetry().addData("CSV warning", csvError);
-        }
         if (angularFit != null) {
             context.getTelemetry().addData("Angular fit RMSE", angularFit.rmse);
             context.getTelemetry().addData("Angular cross-validation RMSE",

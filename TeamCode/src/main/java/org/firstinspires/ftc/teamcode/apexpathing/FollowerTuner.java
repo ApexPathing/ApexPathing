@@ -30,7 +30,7 @@ public class FollowerTuner extends LinearOpMode {
      * Completion is determined by whether the last saved value of the phase's constants is non-zero
      * Tuners are ran in the order of the enum ordinals
      */
-    enum Phase {
+    private enum Phase {
         HEADING(HeadingPhase.class, (FollowerConstants constants) ->
                 constants.angularCoeffs.kP != 0.0),
         LIMITS(LimitsPhase.class, (FollowerConstants constants) ->
@@ -134,7 +134,7 @@ public class FollowerTuner extends LinearOpMode {
         resetPhaseSelection();
     }
 
-    /** A reused simulator OpMode instance must always reopen at the phase picker. */
+    /** Clears transient menu state before and after a tuning session. */
     private void resetPhaseSelection() {
         selectedPhaseOrdinal = null;
         phase = null;
@@ -142,7 +142,7 @@ public class FollowerTuner extends LinearOpMode {
     }
 
     /** Every phase remains selectable; completion state is informational, not a menu lock. */
-    static boolean phaseAvailable(Phase phase) {
+    private static boolean phaseAvailable(Phase phase) {
         return true;
     }
 
@@ -209,17 +209,12 @@ public class FollowerTuner extends LinearOpMode {
         }
     }
 
-    static Phase nextPhase(Phase current) {
+    private static Phase nextPhase(Phase current) {
         int nextOrdinal = current.ordinal() + 1;
         return nextOrdinal < phaseAmount ? phases[nextOrdinal] : null;
     }
 
-    static Class<? extends TuningPhase> nextPhaseClass(Phase current) {
-        Phase next = nextPhase(current);
-        return next == null ? null : next.phaseClass;
-    }
-
-    static boolean velocityFeedbackTuned(double translationGain, double angularGain) {
+    private static boolean velocityFeedbackTuned(double translationGain, double angularGain) {
         return translationGain != 0.0 && angularGain != 0.0;
     }
 

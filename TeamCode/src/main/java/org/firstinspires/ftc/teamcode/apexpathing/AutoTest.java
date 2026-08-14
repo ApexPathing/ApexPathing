@@ -4,22 +4,10 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
-
-import core.ApexStorage;
 import core.Follower;
-import feedforward.MotionParameters;
 import geometry.GeometryFactory;
-import geometry.PathSegment;
 import geometry.Pose;
-import geometry.Vector;
 import paths.movements.FollowerMovement;
-import paths.movements.Path;
 
 /**
  * Test autonomous OpMode for Apex Pathing that uses the {@link ExampleAutoPath}. Make sure the
@@ -35,11 +23,11 @@ public class AutoTest extends LinearOpMode {
     private static final double POSITION_TOLERANCE_INCHES = 3.0;
     private static final double HEADING_TOLERANCE_DEGREES = 5.0;
     // This is a coarse stress-test curve, not the endpoint acceptance tolerance. Leave enough
-    // margin for the measured transient (~7.2 in in FTCodeSim) while still catching gross drift.
+    // margin for normal transient error while still catching gross drift.
     private static final double CROSS_TRACK_TOLERANCE_INCHES = 15;
 
-    ExampleAutoPath path;
-    AutoState currentState = AutoState.OUTBOUND_CURVE;
+    private ExampleAutoPath path;
+    private AutoState currentState = AutoState.OUTBOUND_CURVE;
     private final ElapsedTime stageTimer = new ElapsedTime();
     private String failureReason = "None";
     private int passedStages;
@@ -47,12 +35,8 @@ public class AutoTest extends LinearOpMode {
     private double lastHeadingError;
     private double maximumCrossTrackError;
     private double lastMaximumCrossTrackError;
-    private FileWriter outboundVelocityCsv;
-    private String outboundVelocityCsvPath = "Not started";
-    private String outboundVelocityCsvError;
-    private int outboundVelocityRowsSinceFlush;
 
-    enum AutoState {
+    private enum AutoState {
         OUTBOUND_CURVE,
         POINT_TURN,
         REVERSE_RETURN,
@@ -75,12 +59,10 @@ public class AutoTest extends LinearOpMode {
         if (!opModeIsActive()) { return; }
 
         follower.setPose(Pose.zero());
-        openOutboundVelocityCsv();
         startStage(follower, currentState);
 
         while (opModeIsActive()) {
             follower.update();
-            logOutboundVelocitySample(follower);
             Pose pose = follower.getPose();
             maximumCrossTrackError = Math.max(maximumCrossTrackError,
                     Math.abs(follower.getCrossTrackErrorIn()));
@@ -110,10 +92,6 @@ public class AutoTest extends LinearOpMode {
                     maximumCrossTrackError);
             telemetry.addData("Last maximum cross-track error (in)",
                     lastMaximumCrossTrackError);
-            telemetry.addData("Outbound velocity CSV", outboundVelocityCsvPath);
-            if (outboundVelocityCsvError != null) {
-                telemetry.addData("Velocity CSV warning", outboundVelocityCsvError);
-            }
             telemetry.addData("X (in)", pose.getX().getIn());
             telemetry.addData("Y (in)", pose.getY().getIn());
             telemetry.addData("Heading (deg)", pose.getHeading().getDeg());
@@ -121,12 +99,10 @@ public class AutoTest extends LinearOpMode {
             sleep(20);
         }
 
-        closeOutboundVelocityCsv();
         follower.stop();
     }
 
     private void finishStage(Follower follower, Pose actualPose) {
-        if (currentState == AutoState.OUTBOUND_CURVE) { closeOutboundVelocityCsv(); }
         FollowerMovement completed = movementFor(currentState);
         Pose expectedPose = completed.getEndPose();
         lastPositionError = actualPose.distanceTo(expectedPose).getIn();
@@ -173,7 +149,6 @@ public class AutoTest extends LinearOpMode {
     }
 
     private void fail(Follower follower, String reason) {
-        closeOutboundVelocityCsv();
         follower.stop();
         failureReason = reason;
         currentState = AutoState.FAILED;
@@ -199,7 +174,7 @@ public class AutoTest extends LinearOpMode {
         }
     }
 
-    static AutoState nextState(AutoState state) {
+    private static AutoState nextState(AutoState state) {
         switch (state) {
             case OUTBOUND_CURVE: return AutoState.POINT_TURN;
             case POINT_TURN: return AutoState.REVERSE_RETURN;
@@ -214,83 +189,4 @@ public class AutoTest extends LinearOpMode {
         return state == AutoState.COMPLETE || state == AutoState.FAILED;
     }
 
-    /** Exposes the initial curve for simulation verification and diagnostics. */
-    public Path getOutboundPath() { return path == null ? null : path.testPath; }
-
-    public String getOutboundVelocityCsvPath() { return outboundVelocityCsvPath; }
-
-    public String getOutboundVelocityCsvError() { return outboundVelocityCsvError; }
-
-    private void openOutboundVelocityCsv() {
-        if (!path.testPath.isProfiled()) {
-            outboundVelocityCsvPath = "Unavailable: testPath is not profiled";
-            return;
-        }
-        try {
-            File directory = ApexStorage.getDirectory();
-            if (!directory.exists() && !directory.mkdirs()) {
-                throw new IOException("Could not create " + directory.getAbsolutePath());
-            }
-            String timestamp = new SimpleDateFormat(
-                    "yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
-            File file = new File(directory,
-                    "auto-test-outbound-velocity_" + timestamp + ".csv");
-            outboundVelocityCsv = new FileWriter(file);
-            outboundVelocityCsvPath = file.getAbsolutePath();
-            outboundVelocityCsv.write(
-                    "elapsed_s,path_distance_in,target_velocity_in_s,raw_velocity_in_s," +
-                            "kalman_velocity_in_s,heading_error_rad,command_power,saturated\n");
-        } catch (IOException e) {
-            outboundVelocityCsv = null;
-            outboundVelocityCsvPath = "Unavailable";
-            outboundVelocityCsvError = e.getMessage();
-        }
-    }
-
-    private void logOutboundVelocitySample(Follower follower) {
-        if (outboundVelocityCsv == null || currentState != AutoState.OUTBOUND_CURVE) { return; }
-
-        PathSegment segment = path.testPath.getParametricPath();
-        double t = follower.getBestT();
-        Vector closestPoint = segment.getPosition(t);
-        double remaining = segment.getDistanceToEndIn(closestPoint, t);
-        double traveled = segment.getLengthIn() - remaining;
-        MotionParameters target = path.testPath.getFeedforwardLut().getFFParams(traveled);
-        Vector tangent = segment.getFirstDerivative(t).normalize();
-        double rawVelocity = follower.getRawVelocity().getVec().dot(tangent).getIn();
-        double kalmanVelocity = follower.getVelocity().getVec().dot(tangent).getIn();
-        double headingError = follower.getPose().getHeading().getShortestAngleTo(
-                path.testPath.getEndPose().getHeading()).getRad();
-        double commandPower = Math.max(Math.max(
-                        Math.abs(follower.getDrivetrain().getLastFlPower()),
-                        Math.abs(follower.getDrivetrain().getLastFrPower())),
-                Math.max(Math.abs(follower.getDrivetrain().getLastBlPower()),
-                        Math.abs(follower.getDrivetrain().getLastBrPower())));
-
-        try {
-            outboundVelocityCsv.write(String.format(
-                    Locale.US, "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%s%n",
-                    stageTimer.seconds(), traveled, target.getTangentialVel(), rawVelocity,
-                    kalmanVelocity, headingError, commandPower, commandPower >= 0.98));
-            outboundVelocityRowsSinceFlush++;
-            if (outboundVelocityRowsSinceFlush >= 25) {
-                outboundVelocityCsv.flush();
-                outboundVelocityRowsSinceFlush = 0;
-            }
-        } catch (IOException e) {
-            outboundVelocityCsvError = e.getMessage();
-            closeOutboundVelocityCsv();
-        }
-    }
-
-    private void closeOutboundVelocityCsv() {
-        if (outboundVelocityCsv == null) { return; }
-        try {
-            outboundVelocityCsv.close();
-        } catch (IOException e) {
-            outboundVelocityCsvError = e.getMessage();
-        } finally {
-            outboundVelocityCsv = null;
-        }
-    }
 }

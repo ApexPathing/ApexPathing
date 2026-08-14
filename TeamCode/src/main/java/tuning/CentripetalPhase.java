@@ -31,9 +31,6 @@ public class CentripetalPhase extends TuningPhase {
     private int samples;
     private double averageError;
     private boolean trialRunning;
-    private int trialNumber;
-    private TuningCsvWriter manualCsv;
-    private String manualCsvPath = "Not started";
     private final ElapsedTime legTimer = new ElapsedTime();
 
     public CentripetalPhase(TunerContext context) { super(context); }
@@ -83,10 +80,6 @@ public class CentripetalPhase extends TuningPhase {
             context.getFollower().setCentripetal(context.constants.kCentripetal);
             context.getFollower().stop();
             trialRunning = false;
-            trialNumber = 0;
-            manualCsv = TuningCsvWriter.open("manual_centripetal_response",
-                    "trial", "time_s", "gain", "direction", "path_t", "signed_error_in");
-            manualCsvPath = manualCsv.getPath();
         } else {
             resetTrial();
         }
@@ -102,7 +95,6 @@ public class CentripetalPhase extends TuningPhase {
         context.getFollower().setCentripetal(context.constants.kCentripetal);
         context.getFollower().follow(forwardArc);
         trialRunning = true;
-        trialNumber++;
         legTimer.reset();
     }
 
@@ -118,11 +110,6 @@ public class CentripetalPhase extends TuningPhase {
         }
         errorSum += error;
         samples++;
-        if (manualMode && manualCsv != null) {
-            manualCsv.writeRow(trialNumber, legTimer.seconds(),
-                    context.constants.kCentripetal,
-                    forwardPathRunning ? "OUTBOUND" : "RETURN", t, error);
-        }
     }
 
     private boolean updateTrial() {
@@ -253,7 +240,6 @@ public class CentripetalPhase extends TuningPhase {
                     ? (forwardPathRunning ? "OUTBOUND" : "RETURN")
                     : "IDLE - press X to run");
             context.getTelemetry().addData("Usable samples", samples);
-            context.getTelemetry().addData("Response CSV", manualCsvPath);
         }
         context.getTelemetry().addLine("Dpad Up/Down: change centripetal gain");
         context.getTelemetry().addLine("X: run/restart arc test");
@@ -262,7 +248,6 @@ public class CentripetalPhase extends TuningPhase {
 
         if (opMode.gamepad1.aWasPressed()) {
             context.getFollower().stop();
-            if (manualCsv != null) { manualCsv.close(); }
             return true;
         }
         return false;

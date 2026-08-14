@@ -225,7 +225,7 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
 
     }
 
-    /** Clears motion history after an odometry pose reset or simulator staging teleport. */
+    /** Clears motion history after an odometry pose reset. */
     protected void resetKinematicEstimate(Pose newPose) {
         pose = newPose;
         velocity = Pose.zero();
