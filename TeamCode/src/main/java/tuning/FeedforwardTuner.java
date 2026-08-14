@@ -27,7 +27,6 @@ public class FeedforwardTuner extends TuningPhase {
     private static final double CHARACTERIZATION_POWER = 0.70;
     private static final double AUTO_SETTLE_TIME = 0.40;
     private static final double MIN_SAMPLE_TIME = 0.12;
-    private static final double SIM_STAGING_OFFSET = 55.0;
     private static final double STATIONARY_LINEAR_SPEED_IN_PER_SEC = 1.0;
     private static final double STATIONARY_ANGULAR_SPEED_RAD_PER_SEC = 0.10;
     private static final double MAX_CROSS_VALIDATION_RMSE = 0.15;
@@ -674,10 +673,6 @@ public class FeedforwardTuner extends TuningPhase {
                     : "Waiting for the robot to stop before starting.");
             context.getTelemetry().update();
             if (opMode.gamepad1.aWasPressed() && stationary) {
-                double stagingX = run.axis == Axis.ANGULAR ? 0.0 :
-                        (run.forward ? -SIM_STAGING_OFFSET : SIM_STAGING_OFFSET);
-                positionRobotForSimulation(new Pose(
-                        Vector.of(stagingX, 0.0, DistUnit.IN), Angle.fromRad(0.0)));
                 commandPowerFilter.reset();
                 lastAppliedCharacterizationPower = 0.0;
                 timer.reset();

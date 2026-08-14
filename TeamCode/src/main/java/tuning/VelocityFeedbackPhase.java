@@ -101,11 +101,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
         // Center the complete 48-inch translation footprint on the field.
         Pose start = factory.pose(-24, 0, 0);
         Pose end = factory.pose(24, 0, 0);
-        if (Boolean.getBoolean("apex.simulation.unlockTunerPhases")) {
-            positionRobotForSimulation(start);
-        } else {
-            context.getFollower().setPose(start);
-        }
+        context.getFollower().setPose(start);
         forwardPath = factory.path(start, end)
                 .interpolateWith(InterpolationStyle.CONSTANT_START_HEADING).profiledBuild();
         backwardPath = factory.path(end, start)

@@ -26,9 +26,6 @@ import tuning.VelocityFeedbackPhase;
  */
 @TeleOp(name = "Follower Tuner", group = "Apex Pathing")
 public class FollowerTuner extends LinearOpMode {
-    /** Allows the desktop simulator to exercise phases without saved prerequisite constants. */
-    public static final String UNLOCK_PHASES_PROPERTY = "apex.simulation.unlockTunerPhases";
-
     /**
      * Completion is determined by whether the last saved value of the phase's constants is non-zero
      * Tuners are ran in the order of the enum ordinals
@@ -200,7 +197,7 @@ public class FollowerTuner extends LinearOpMode {
                     .newInstance(context);
             isPhaseSelected = true;
             // Do not let a rate-limited RESULTS frame from the previous phase obscure the next
-            // phase's selector in FTCodeSim's Driver Station.
+            // phase's selector.
             telemetry.clearAll();
             context.addInterfaceHeader();
             telemetry.addLine("Next phase: " + phaseDisplayName(selectedPhaseOrdinal));
@@ -234,18 +231,6 @@ public class FollowerTuner extends LinearOpMode {
         telemetry.clearAll();
         context.addInterfaceHeader();
         telemetry.addLine("All follower tuning phases are complete.");
-
-        // FTCodeSim does not move its Driver Station out of RUNNING when a LinearOpMode calls
-        // requestOpModeStop(). Keep the final lifecycle alive until the red Stop button is used.
-        if (Boolean.getBoolean(UNLOCK_PHASES_PROPERTY)) {
-            telemetry.addLine("Press the red STOP button to finish this simulation.");
-            telemetry.update();
-            while (opModeIsActive()) {
-                context.updateDebugMode(false);
-                sleep(50);
-            }
-            return;
-        }
 
         telemetry.update();
         requestOpModeStop();

@@ -52,7 +52,6 @@ public class LimitsPhase extends TuningPhase {
     private static final int REQUIRED_STABLE_WINDOWS = 3;
     private static final double MAX_TRANSLATION_TRAVEL = 60.0;
     private static final double MAX_ANGULAR_TRAVEL = Math.PI * 2.0;
-    private static final double SIM_STAGING_OFFSET = 55.0;
     public static final double MARGIN_MULTIPLIER = 0.95;
 
     private final ElapsedTime timer = new ElapsedTime();
@@ -122,14 +121,6 @@ public class LimitsPhase extends TuningPhase {
     }
 
     private void beginTrial() {
-        LimitTrial current = TRIALS[trial];
-        if (current == LimitTrial.FORWARD) {
-            positionRobotForSimulation(stagingPose(-SIM_STAGING_OFFSET, 0.0));
-        } else if (current == LimitTrial.LEFT) {
-            positionRobotForSimulation(stagingPose(0.0, -SIM_STAGING_OFFSET));
-        } else {
-            positionRobotForSimulation(Pose.zero());
-        }
         heldHeading = context.getFollower().getPose().getHeading().getRad();
         headingHoldController.reset();
         velocityWindow.clear();
@@ -141,10 +132,6 @@ public class LimitsPhase extends TuningPhase {
         stableWindows = 0;
         timer.reset();
         stage = LimitStage.SETTLING;
-    }
-
-    private Pose stagingPose(double x, double y) {
-        return new Pose(Vector.of(x, y, DistUnit.IN), Angle.fromRad(0.0));
     }
 
     private void runTrial() {
@@ -194,7 +181,7 @@ public class LimitsPhase extends TuningPhase {
 
                 // Derive acceleration from the same timestamped velocity stream used to detect
                 // maximum velocity. The localizer's separately filtered acceleration can miss a
-                // short FTCodeSim/robot ramp and report an entire valid trial as zero.
+                // short robot ramp and report an entire valid trial as zero.
                 if (timer.milliseconds() >= ACCELERATION_IGNORE_TIME && deltaTime > 0.005 &&
                         Double.isFinite(lastMeasuredVelocity)) {
                     double derivedAcceleration = (velocity - lastMeasuredVelocity) / deltaTime;

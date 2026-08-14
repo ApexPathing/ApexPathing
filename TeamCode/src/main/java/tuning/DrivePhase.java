@@ -62,7 +62,6 @@ public class DrivePhase extends TuningPhase {
     @Override
     protected void init() {
         // Both automatic closed-loop trials and the manual test path travel in both directions.
-        positionRobotForSimulation(geometry.Pose.zero());
         testPathQueued = false;
         testButtonHeld = opMode.gamepad1.x;
         // We only want to use the existing drive coefficients if we are in manual mode

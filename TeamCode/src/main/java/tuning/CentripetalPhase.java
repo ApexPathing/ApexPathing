@@ -64,11 +64,7 @@ public class CentripetalPhase extends TuningPhase {
         Pose start = factory.pose(-16, -16, 0);
         Pose middle = factory.pose(16, -16, 0);
         Pose end = factory.pose(16, 16, 90);
-        if (Boolean.getBoolean("apex.simulation.unlockTunerPhases")) {
-            positionRobotForSimulation(start);
-        } else {
-            context.getFollower().setPose(start);
-        }
+        context.getFollower().setPose(start);
         forwardArc = factory.path(start, middle, end)
                 .interpolateWith(InterpolationStyle.TANGENT_FORWARD).quickBuild();
         backwardArc = factory.path(end, middle, start)

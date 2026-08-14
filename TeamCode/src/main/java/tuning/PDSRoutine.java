@@ -171,13 +171,9 @@ public class PDSRoutine {
 
     private void resetAxisPose(TunerContext context) {
         Pose stagingPose = stagingPoseFor(axis);
-        if (Boolean.getBoolean("apex.simulation.unlockTunerPhases")) {
-            context.positionRobotForSimulation(stagingPose);
-        } else {
-            // Re-zeroing odometry does not move the real robot. Alternating trial directions keep
-            // the repeated tests near the same physical location.
-            context.getFollower().setPose(Pose.zero());
-        }
+        // Re-zeroing odometry does not move the real robot. Alternating trial directions keep
+        // the repeated tests near the same physical location.
+        context.getFollower().setPose(Pose.zero());
         startValue = getValue(stagingPose);
     }
 

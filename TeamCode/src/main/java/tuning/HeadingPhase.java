@@ -47,7 +47,6 @@ public class HeadingPhase extends TuningPhase {
 
     @Override
     protected void init() {
-        positionRobotForSimulation(geometry.Pose.zero());
         // Clear any motor command left by the previously selected phase before changing which
         // controllers are allowed to write to the drivetrain.
         context.getFollower().stop();

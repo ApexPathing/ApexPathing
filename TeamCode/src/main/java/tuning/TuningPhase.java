@@ -2,7 +2,6 @@ package tuning;
 
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
-import geometry.Pose;
 
 /**
  * Base class for tuning phases for the follower tuner. Each phase is responsible for tuning a
@@ -75,9 +74,8 @@ public abstract class TuningPhase {
 
             // A LinearOpMode can otherwise spin much faster than the hardware/localizer can
             // provide new samples. Besides wasting CPU, differentiating the same pose repeatedly
-            // and then one discrete update creates enormous acceleration spikes (especially in
-            // FTCodeSim, whose physics advances every 20 ms). Use a deterministic 50 Hz sampling
-            // cadence for every tuner phase.
+            // and then one discrete update creates enormous acceleration spikes. Use a
+            // deterministic 50 Hz sampling cadence for every tuner phase.
             opMode.sleep(20);
         }
 
@@ -116,14 +114,6 @@ public abstract class TuningPhase {
     }
 
     protected String number(double value) { return context.formatNumber(value); }
-
-    /**
-     * Places a simulated movement test at its phase-specific staging pose. On hardware, resetting
-     * odometry cannot move the physical robot, so positioning remains the operator's responsibility.
-     */
-    protected void positionRobotForSimulation(Pose pose) {
-        context.positionRobotForSimulation(pose);
-    }
 
     protected double manualChange() {
         if (opMode.gamepad1.dpadLeftWasPressed()) {

@@ -16,7 +16,6 @@ import java.util.Locale;
 import core.ApexStorage;
 import core.Follower;
 import core.FollowerConstants;
-import geometry.Pose;
 
 /**
  * Provides a context for the tuner phases to operate in, including access th the OpMode, telemetry,
@@ -93,13 +92,6 @@ public class TunerContext {
             getTelemetry().addLine("Hold Right Stick Button to exit debug mode.");
         }
         if (debugMode) { getTelemetry().addLine(); }
-    }
-
-    /** Teleports only FTCodeSim; real hardware must still be positioned by its operator. */
-    public void positionRobotForSimulation(Pose pose) {
-        if (!Boolean.getBoolean("apex.simulation.unlockTunerPhases")) { return; }
-        follower.stop();
-        follower.setPose(pose);
     }
 
     public void saveConstants() {
