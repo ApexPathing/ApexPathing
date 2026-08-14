@@ -14,12 +14,16 @@ import geometry.Pose;
  * moves before the operator accepts them.
  */
 public class PDSRoutine {
+    // region Tuning model
+
+    /** Physical axis controlled by this tuning pass. */
     enum Axis {
         DRIVE,
         STRAFE,
         HEADING
     }
 
+    /** High-level phases of the routine's state machine. */
     enum PDSState {
         TUNING_KS,
         SETTLING_BETWEEN_KS,
@@ -29,6 +33,7 @@ public class PDSRoutine {
         OPERATOR_CHECK
     }
 
+    /** Gain set currently being measured by the finite-difference optimizer. */
     private enum Evaluation {
         BASELINE,
         KP_PLUS,
@@ -37,6 +42,10 @@ public class PDSRoutine {
         KD_MINUS,
         CANDIDATE
     }
+
+    // endregion
+
+    // region Safety and timing limits
 
     private static final double MOVEMENT_THRESHOLD = 0.05;
     private static final double HEADING_THRESHOLD = 0.02;
@@ -52,6 +61,10 @@ public class PDSRoutine {
     private static final double MAX_PD_SAMPLE_GAP_SECONDS = 0.50;
     private static final int MAX_ERROR_ZERO_CROSSINGS = 8;
     private static final double MAX_SATURATION_FRACTION = 0.80;
+
+    // endregion
+
+    // region User-configurable PD tuning parameters
 
     /*
      * Public tuning limits are deliberately simple source-level configuration. Gains are always
@@ -82,6 +95,11 @@ public class PDSRoutine {
     public static double PD_NORMALIZED_GRADIENT_TOLERANCE = 0.03;
     public static double PD_MAX_TUNING_SECONDS = 240.0;
 
+    // endregion
+
+    // region Routine state
+
+    // Dependencies and timers shared by every phase.
     private final Axis axis;
     private final ElapsedTime timer = new ElapsedTime();
     private final ElapsedTime sessionTimer = new ElapsedTime();
@@ -89,6 +107,7 @@ public class PDSRoutine {
     private BinarySearch search;
     private final double threshold;
 
+    // State-machine and operator-check state.
     private PDSState state = PDSState.TUNING_KS;
     private double startValue;
     private double testTarget;
@@ -100,6 +119,7 @@ public class PDSRoutine {
     private String operatorCheckSummary = "Not started";
     private TuningCsvWriter csv;
 
+    // Optimizer state accumulated across evaluations and iterations.
     private Evaluation evaluation;
     private int iteration;
     private int trialRepeat;
@@ -129,6 +149,7 @@ public class PDSRoutine {
     private double pdTuningStartedSeconds;
     private String automaticTuneSummary = "Not started";
 
+    // Measurements and safeguards for the active closed-loop trial.
     private double trialCost;
     private double trialStartPosition;
     private double nextPdTestTarget;
@@ -138,6 +159,10 @@ public class PDSRoutine {
     private int errorZeroCrossings;
     private double saturatedSeconds;
     private String trialBadReason;
+
+    // endregion
+
+    // region Lifecycle and state machine
 
     PDSRoutine(TunerContext context, Axis axis) {
         this.axis = axis;
@@ -239,6 +264,10 @@ public class PDSRoutine {
         }
     }
 
+    // endregion
+
+    // region Static-friction tuning
+
     private boolean updateStaticFriction(TunerContext context) {
         double command = search.getGuess();
         move(context, command);
@@ -277,6 +306,10 @@ public class PDSRoutine {
         timer.reset();
         return true;
     }
+
+    // endregion
+
+    // region Automatic PD tuning
 
     private void initializePdTuning(TunerContext context) {
         validateTuningConfiguration();
@@ -714,6 +747,10 @@ public class PDSRoutine {
         controller.getCoefficients().setkD(Range.clip(kD, minKd(), maxKd()));
     }
 
+    // endregion
+
+    // region Operator validation
+
     private void beginOperatorCheck() {
         nextTestTarget = trialMagnitudeFor(axis);
         testTarget = 0.0;
@@ -791,6 +828,10 @@ public class PDSRoutine {
                 : "Test stopped after timeout; retune if the response is not acceptable";
         return false;
     }
+
+    // endregion
+
+    // region Trial math and safety helpers
 
     /**
      * Gives a stalled controller just enough output to cross the measured static-friction floor.
@@ -881,6 +922,10 @@ public class PDSRoutine {
         return Math.max(0.0, (oldCost - newCost) / oldCost);
     }
 
+    // endregion
+
+    // region Axis-specific configuration
+
     private double badTrialCost(double target) {
         return 10.0 * TEST_TIMEOUT_SECONDS * target * target;
     }
@@ -934,6 +979,10 @@ public class PDSRoutine {
         double candidate = Double.isFinite(saved) && saved > minimum ? saved : fallback;
         return Range.clip(candidate, minimum, maximum);
     }
+
+    // endregion
+
+    // region Failure handling, logging, and telemetry
 
     private void abort(TunerContext context, String reason) {
         context.getFollower().stop();
@@ -1041,9 +1090,15 @@ public class PDSRoutine {
         }
     }
 
+    // endregion
+
+    // region Results
+
     PDSCoefficients getCoefficients() { return controller.getCoefficients(); }
 
     String getOperatorCheckSummary() { return operatorCheckSummary; }
 
     String getCsvPath() { return csv == null ? "Unavailable" : csv.getPath(); }
+
+    // endregion
 }
