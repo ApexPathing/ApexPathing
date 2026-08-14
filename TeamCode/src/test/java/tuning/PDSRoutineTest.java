@@ -118,4 +118,15 @@ public class PDSRoutineTest {
             assertEquals(0.0, PDSRoutine.stagingPoseFor(axis).getHeading().getRad(), 1e-9);
         }
     }
+
+    @Test
+    public void automaticPdsTrialsAlternateForwardAndBackward() {
+        double magnitude = PDSRoutine.trialMagnitudeFor(PDSRoutine.Axis.DRIVE);
+
+        double backward = PDSRoutine.alternatingTrialTarget(magnitude, magnitude);
+        double forward = PDSRoutine.alternatingTrialTarget(backward, magnitude);
+
+        assertEquals(-magnitude, backward, 1e-9);
+        assertEquals(magnitude, forward, 1e-9);
+    }
 }

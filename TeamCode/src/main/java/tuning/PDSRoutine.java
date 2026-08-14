@@ -368,7 +368,7 @@ public class PDSRoutine {
         double magnitude = trialMagnitudeFor(axis);
         trialStartPosition = getRelativePosition(context);
         testTarget = nextPdTestTarget;
-        nextPdTestTarget = Math.abs(testTarget) < 1e-9 ? magnitude : 0.0;
+        nextPdTestTarget = alternatingTrialTarget(testTarget, magnitude);
         testSettledSince = -1.0;
         testFinalError = testTarget;
         trialCost = 0.0;
@@ -380,6 +380,11 @@ public class PDSRoutine {
         trialBadReason = null;
         controller.reset();
         timer.reset();
+    }
+
+    /** Each automatically tuned move starts from a re-zeroed pose, so alternate its direction. */
+    static double alternatingTrialTarget(double currentTarget, double magnitude) {
+        return currentTarget >= 0.0 ? -Math.abs(magnitude) : Math.abs(magnitude);
     }
 
     private boolean updatePdTrial(TunerContext context) {
