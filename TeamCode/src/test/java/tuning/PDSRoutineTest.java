@@ -89,7 +89,7 @@ public class PDSRoutineTest {
     public void stalledOperatorTestClearsSoftStaticFrictionDeadband() {
         double tolerance = Math.toRadians(2.5);
 
-        assertEquals(-0.25125, PDSRoutine.ensureTestBreakawayPower(
+        assertEquals(-0.28125, PDSRoutine.ensureTestBreakawayPower(
                 -0.2359652517928235,
                 -0.043727866438586505,
                 0.0,

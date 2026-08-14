@@ -256,7 +256,13 @@ public class FollowerTunerTelemetryTest {
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);
             tuner.gamepad1.b = false;
             SimLinearOpModeBridge.start(session);
-            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+            long modeDeadline = System.nanoTime() + 3_000_000_000L;
+            while (!latestFrameContains(frames, "Heading Controller phase initialized") &&
+                    System.nanoTime() < modeDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
+            assertTrue("Heading mode selector did not initialize",
+                    latestFrameContains(frames, "Heading Controller phase initialized"));
 
             tuner.gamepad1.a = true;
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);
@@ -585,6 +591,10 @@ public class FollowerTunerTelemetryTest {
     public void automaticFeedforwardCharacterizationPassesWithSimMotorModel() throws Exception {
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         markAllPhasesCompleteForSelectionTest();
+        // This test enters feedforward directly instead of running the prerequisite PDS phases.
+        // Match their static-gain result to the simulated drivetrain's 0.45 breakaway power.
+        FollowerConstants.getInstance().angularCoeffs.kS = 0.45;
+        FollowerConstants.getInstance().translationalCoeffs.kS = 0.45;
         List<String> frames = new CopyOnWriteArrayList<>();
         ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
         telemetry.setMsTransmissionInterval(0);
@@ -611,7 +621,13 @@ public class FollowerTunerTelemetryTest {
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);
             tuner.gamepad1.b = false;
             SimLinearOpModeBridge.start(session);
-            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+            long modeDeadline = System.nanoTime() + 3_000_000_000L;
+            while (!latestFrameContains(frames, "Feedforward Refinement phase initialized") &&
+                    System.nanoTime() < modeDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
+            assertTrue("Feedforward mode selector did not initialize",
+                    latestFrameContains(frames, "Feedforward Refinement phase initialized"));
 
             tuner.gamepad1.a = true;
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);

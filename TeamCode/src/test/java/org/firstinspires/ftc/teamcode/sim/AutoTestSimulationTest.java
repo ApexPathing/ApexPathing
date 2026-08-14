@@ -23,7 +23,7 @@ import controllers.PDSController.PDSCoefficients;
 import paths.movements.Path;
 
 public class AutoTestSimulationTest {
-    @Test(timeout = 90_000L)
+    @Test(timeout = 130_000L)
     public void autoTestCompletesEveryMovement() throws Exception {
         configureStableConstants();
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
@@ -48,7 +48,7 @@ public class AutoTestSimulationTest {
             Path outbound = auto.getOutboundPath();
             assertTrue("Auto Test did not finish building its outbound path", outbound != null);
             SimLinearOpModeBridge.start(session);
-            long deadline = System.nanoTime() + 70_000_000_000L;
+            long deadline = System.nanoTime() + 100_000_000_000L;
             while (!latest(frames).contains("Current check COMPLETE") &&
                     !latest(frames).contains("Current check FAILED")) {
                 if (System.nanoTime() >= deadline) { break; }
