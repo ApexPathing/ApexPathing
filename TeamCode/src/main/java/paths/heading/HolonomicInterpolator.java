@@ -41,7 +41,7 @@ public class HolonomicInterpolator implements HeadingInterpolator {
      * remaining. When s > blendWindow, u = 0. When s = 0, u = 1.
      */
     private double getBlendU(double s) {
-        if (blendWindow <= 1e-6 || s > blendWindow) { return 0.0; }
+        if (blendWindow <= 0.5 || s > blendWindow) { return 0.0; }
         return 1.0 - s / blendWindow;
     }
 
