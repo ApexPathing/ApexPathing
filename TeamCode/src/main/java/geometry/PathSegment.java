@@ -10,7 +10,7 @@ package geometry;
  * @author DrPixelCat - 7842 alum
  */
 public class PathSegment {
-    private static final double POINTS_PER_INCH = 0.5;
+    private static final double POINTS_PER_INCH = 0.75;
 
     private final ParametricSegment segment;
     private final double length;
@@ -246,5 +246,20 @@ public class PathSegment {
         else { normal = Vector.of(-vy, vx, DistUnit.IN); }
 
         return normal.normalize();
+    }
+
+    /**
+     * Returns the unit normal on the left side of the path tangent. Unlike the principal arc
+     * normal, this direction remains defined on straight sections and does not flip at an
+     * inflection point, making it suitable for signed cross-track feedback.
+     */
+    public static Vector calculateLeftNormal(Vector firstDerivative) {
+        Vector tangent = firstDerivative.normalize();
+        if (tangent.getMag().getIn() < 1e-9) { return Vector.zero(); }
+        return Vector.of(
+                -tangent.getY().getIn(),
+                tangent.getX().getIn(),
+                DistUnit.IN
+        );
     }
 }

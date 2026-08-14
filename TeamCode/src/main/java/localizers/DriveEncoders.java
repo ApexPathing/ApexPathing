@@ -82,6 +82,7 @@ public class DriveEncoders extends BaseLocalizer<DriveEncoders.Constants> {
             backLeft.reset();
             backRight.reset();
         }
+        resetKinematicEstimate(newPose);
     }
 
     public static class Constants implements BaseLocalizerConstants<Constants> {

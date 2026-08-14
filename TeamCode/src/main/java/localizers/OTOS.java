@@ -37,12 +37,14 @@ public class OTOS extends BaseLocalizer<OTOS.Constants> {
     public void update() {
         otos.update();
         pose = otos.getPose();
-        velocity = otos.getVel();
-        acceleration = otos.getAccel();
+        calculate(otos.getVel());
     }
 
     @Override
-    public void setPose(Pose newPose) { otos.setPosition(newPose); }
+    public void setPose(Pose newPose) {
+        otos.setPosition(newPose);
+        resetKinematicEstimate(newPose);
+    }
 
     /** Configuration class for the Sparkfun OTOS localizer. */
     public static class Constants implements BaseLocalizerConstants<Constants> {

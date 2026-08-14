@@ -4,89 +4,123 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
 import core.Follower;
+import geometry.Angle;
+import geometry.AngleUnit;
+import geometry.Dist;
+import geometry.DistUnit;
 import geometry.GeometryFactory;
 import geometry.Pose;
+import geometry.Vector;
+import paths.heading.InterpolationStyle;
+import paths.movements.FollowerMovement;
 
-/**
- * Test autonomous OpMode for Apex Pathing that uses the {@link ExampleAutoPath}. Make sure the
- * robot has been tuned with the {@link FollowerTuner} before running this OpMode. This OpMode will
- * first follow the test path, then follow the test turn, and finally stop.
- *
- * @author Sohum Arora - 22985 Paraducks
- * @author Dylan B. - 18597 RoboClovers - Delta
- */
+/** Runs each Apex Pathing test movement in order. */
 @Autonomous(name = "Apex Auto Test", group = "Apex Pathing")
 public class AutoTest extends LinearOpMode {
-    ExampleAutoPath path;
-    AutoState currentState = AutoState.TEST_PATH;
+    private static final Pose START_POSE = new Pose(Vector.zero(), Angle.fromDeg(90));
 
-    enum AutoState { TEST_PATH, TEST_TURN, COMPLETE }
+    private FollowerMovement[] movements;
+    private int movementIndex;
+    private String callbackMessage = "No callback triggered yet";
+
+
+    private FollowerMovement[] buildMovements(GeometryFactory factory) {
+        FollowerMovement testYMove = factory.path(START_POSE,
+                        factory.pose(0, 30, 90))
+                .interpolateWith(InterpolationStyle.CONSTANT_END_HEADING)
+                .profiledBuild();
+
+        FollowerMovement testXMove = factory.path(testYMove.getEndPose(),
+                        factory.pose(30, 30, 90))
+                .interpolateWith(InterpolationStyle.CONSTANT_END_HEADING)
+                .quickBuild();
+
+        FollowerMovement testTurn = factory.turn(testXMove.getEndPose())
+                .turnTo(Angle.fromDeg(0))
+                .addAngularCallback(Angle.fromDeg(45), this::exampleAngularCallback)
+                .profiledBuild();
+
+        FollowerMovement testArc = factory.path(testTurn.getEndPose(),
+                        factory.pose(30,0),
+                        factory.pose(0,0),
+                        factory.pose(0, 30, 0))
+                .interpolateWith(InterpolationStyle.CONSTANT_END_HEADING)
+                .profiledBuild();
+        FollowerMovement strafeBackPath = factory.path(testArc.getEndPose(),
+                        factory.pose(30, 30),
+                        factory.pose(30, 15),
+                        factory.pose(0, 15, 90),
+                        START_POSE)
+                .interpolateWith(InterpolationStyle.TANGENT_BACKWARD)
+                .setDistanceToStartFinalTurn(Dist.fromIn(0.0))
+                .profiledBuild();
+
+        return new FollowerMovement[] {
+                testYMove,
+                testXMove,
+                testTurn,
+                testArc,
+                strafeBackPath
+        };
+    }
 
     @Override
     public void runOpMode() {
         Follower follower = new Follower(new Constants(), hardwareMap);
-        path = new ExampleAutoPath(follower, GeometryFactory.PoseMirror.NONE);
+        GeometryFactory factory = new GeometryFactory(follower)
+                .setDistUnit(DistUnit.IN)
+                .setAngleUnit(AngleUnit.DEG)
+                .setPoseMirror(GeometryFactory.PoseMirror.NONE);
 
-        telemetry.addLine("Use B to stop all robot movement");
+        movements = buildMovements(factory);
+
+        telemetry.addLine("Apex follower test: curve, turn, return, and strafe.");
         telemetry.addLine("Press Start to begin");
         telemetry.update();
 
         waitForStart();
+        if (!opModeIsActive()) {
+            return;
+        }
 
-        // TODO: Comment this when testing the second state machine method
-        follower.follow(path.testPath);
+        follower.setPose(START_POSE);
+        follower.follow(movements[movementIndex]);
 
-        while (opModeIsActive()) {
+        while (opModeIsActive() && movementIndex < movements.length) {
             follower.update();
+
+            if (!follower.isBusy()) {
+                movementIndex++;
+                if (movementIndex < movements.length) {
+                    follower.follow(movements[movementIndex]);
+                }
+            }
+
             Pose pose = follower.getPose();
-
-            if (gamepad1.b) { // Halt the robot if B is pressed
-                follower.pause();
-                telemetry.addLine("Follower stopped");
-            }
-
-            switch (currentState) {
-                case TEST_PATH:
-                    if (!follower.isBusy()) {
-                        follower.follow(path.testTurn);
-                        currentState = AutoState.TEST_TURN;
-                    }
-                    break;
-                case TEST_TURN:
-                    if (!follower.isBusy()) {
-                        currentState = AutoState.COMPLETE;
-                    }
-                    break;
-                case COMPLETE:
-                    telemetry.addLine("Auto Test Completed!");
-                    break;
-            }
-
-            /* TODO: Test to make sure this version works
-            switch (currentState) {
-                case TEST_PATH:
-                    if (!path.testPath.hasStarted()) follower.follow(path.testPath);
-                    if (path.testPath.hasEnded()) currentState = AutoState.TEST_TURN;
-                    break;
-
-                case TEST_TURN:
-                    if (!path.testTurn.hasStarted()) follower.follow(path.testTurn);
-                    if (path.testTurn.hasEnded()) currentState = AutoState.COMPLETE;
-                    break;
-
-                case COMPLETE:
-                    telemetry.addLine("Auto Test Completed!");
-                    break;
-            }
-            */
-
-            telemetry.addData("Current state:", currentState);
-            telemetry.addData("Callback state:", path.callbackMessage);
-            telemetry.addData("Follower is busy:", follower.isBusy());
-            telemetry.addData("X (in):", pose.getX().getIn());
-            telemetry.addData("Y (in):", pose.getY().getIn());
-            telemetry.addData("Heading (deg):", pose.getHeading().getDeg());
+            telemetry.addData("Movement", Math.min(movementIndex + 1, movements.length)
+                    + " / " + movements.length);
+            telemetry.addData("Follower busy", follower.isBusy());
+            telemetry.addData("Callback", callbackMessage);
+            telemetry.addData("X (in)", pose.getX().getIn());
+            telemetry.addData("Y (in)", pose.getY().getIn());
+            telemetry.addData("Heading (deg)", pose.getHeading().getDeg());
             telemetry.update();
         }
+
+        follower.stop();
+        telemetry.addLine("Apex follower test complete.");
+        telemetry.update();
+    }
+
+    private void exampleDistanceCallback() {
+        callbackMessage = "Outbound distance callback triggered.";
+    }
+
+    private void exampleAngularCallback() {
+        callbackMessage = "Turn callback triggered.";
+    }
+
+    private void exampleReturnCallback() {
+        callbackMessage = "Return distance callback triggered.";
     }
 }

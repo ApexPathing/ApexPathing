@@ -1,7 +1,5 @@
 package core;
 
-import android.os.Environment;
-
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -63,8 +61,7 @@ public class FollowerConstants {
     }
 
     public void reload() {
-        File file = new File(Environment.getExternalStorageDirectory().getPath() +
-                "/FIRST/ApexPathing/constants.json");
+        File file = ApexStorage.getConstantsFile();
         if (!file.exists()) { return; }
 
         JSONObject json;

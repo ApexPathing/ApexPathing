@@ -68,11 +68,11 @@ public class Octoquad extends BaseLocalizer<Octoquad.Constants> {
                     Vector.of(localizer.posX_mm, localizer.posY_mm, DistUnit.MM),
                     Angle.of(localizer.heading_rad, AngleUnit.RAD)
             );
-            velocity = new Pose(
+            Pose measuredVelocity = new Pose(
                     Vector.of(localizer.velX_mmS, localizer.velY_mmS, DistUnit.MM),
                     Angle.of(localizer.velHeading_radS, AngleUnit.RAD)
             );
-            calculate(UpdateType.ACCELERATION);
+            calculate(measuredVelocity);
         }
     }
 
@@ -83,6 +83,7 @@ public class Octoquad extends BaseLocalizer<Octoquad.Constants> {
                 newPose.getY(DistUnit.MM),
                 (float) newPose.getHeading(AngleUnit.RAD)
         );
+        resetKinematicEstimate(newPose);
     }
 
     /** Configuration class for Octoquad localizer. */

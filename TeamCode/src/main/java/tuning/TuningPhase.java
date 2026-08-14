@@ -2,6 +2,7 @@ package tuning;
 
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
+
 /**
  * Base class for tuning phases for the follower tuner. Each phase is responsible for tuning a
  * specific aspect of the follower's behavior The class provides a framework for running the tuning
@@ -34,6 +35,10 @@ public abstract class TuningPhase {
         TuningState state = TuningState.SELECT_MODE;
 
         while (opMode.opModeIsActive()) {
+            context.updateDebugMode(false);
+            context.getTelemetry().clearAll();
+            context.addInterfaceHeader();
+
             switch (state) {
                 case SELECT_MODE:
                     showModeSelector();
@@ -66,6 +71,12 @@ public abstract class TuningPhase {
                     }
                     break;
             }
+
+            // A LinearOpMode can otherwise spin much faster than the hardware/localizer can
+            // provide new samples. Besides wasting CPU, differentiating the same pose repeatedly
+            // and then one discrete update creates enormous acceleration spikes. Use a
+            // deterministic 50 Hz sampling cadence for every tuner phase.
+            opMode.sleep(20);
         }
 
         context.getFollower().stop();
@@ -81,9 +92,13 @@ public abstract class TuningPhase {
             manualMode = manualTuneIsPossible();
             context.getTelemetry().addData("Tuner Type:", manualMode ? "Manual" : "Automatic");
         }
+        showPreRunInstructions();
         context.getTelemetry().addLine("Press A to run this phase.");
         context.getTelemetry().update();
     }
+
+    /** Adds phase-specific positioning or safety guidance before the operator starts motion. */
+    protected void showPreRunInstructions() { }
 
     private void showResults() {
         context.getTelemetry().addLine(getPhaseName() + " phase complete with results:");
@@ -91,6 +106,14 @@ public abstract class TuningPhase {
         context.getTelemetry().addLine("Press B to continue.");
         context.getTelemetry().update();
     }
+
+    /** Displays a compact editable value list without spending a separate line on selection. */
+    protected void addTunableValue(String label, double value, boolean selected) {
+        context.getTelemetry().addLine((selected ? "-> " : "   ") + label + ": " +
+                context.formatNumber(value));
+    }
+
+    protected String number(double value) { return context.formatNumber(value); }
 
     protected double manualChange() {
         if (opMode.gamepad1.dpadLeftWasPressed()) {

@@ -24,13 +24,22 @@ import localizers.util.LowPassFilter;
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
 public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
+    private static final AdaptiveKalmanFilter.KalmanTuning DEFAULT_TRANSLATION_KALMAN =
+            new AdaptiveKalmanFilter.KalmanTuning(0.25, 625.0);
+    private static final AdaptiveKalmanFilter.KalmanTuning DEFAULT_HEADING_KALMAN =
+            new AdaptiveKalmanFilter.KalmanTuning(0.01, 25.0);
+    public enum VelocityFilterMode {
+        ADAPTIVE_KALMAN,
+        MOVING_AVERAGE
+    }
+
     protected T config;
-    private final boolean USE_KALMAN = true; // set this to false if kalman filter has issues to revert to low pass filter
+    private VelocityFilterMode velocityFilterMode;
 
     // A single set of filters. When fed velocity, they output [Velocity, Acceleration].
-    private DataFilter xFilter = USE_KALMAN ? new AdaptiveKalmanFilter() : new LowPassFilter();
-    private DataFilter yFilter = USE_KALMAN ? new AdaptiveKalmanFilter() : new LowPassFilter();
-    private DataFilter headingFilter = USE_KALMAN ? new AdaptiveKalmanFilter() : new LowPassFilter();
+    private DataFilter xFilter;
+    private DataFilter yFilter;
+    private DataFilter headingFilter;
 
     protected enum UpdateType { VELOCITY, ACCELERATION, BOTH }
 
@@ -40,10 +49,8 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
     protected Pose acceleration = Pose.zero();
     protected Pose rawAcceleration = Pose.zero();
 
-    /** Only used for calculating velocity on some localizers */
+    /** History shared by pose-derived and native-velocity localizers. */
     private Pose prevPose = Pose.zero();
-
-    /** Only used for calculating acceleration on some localizers */
     private Pose prevRawVelocity = Pose.zero();
     private long prevTimeNs = -1;
 
@@ -58,7 +65,14 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
      * @param config your localizer configuration object that is a child of
      *               {@link BaseLocalizerConstants}
      */
-    public BaseLocalizer(T config) { this.config = config; }
+    public BaseLocalizer(T config) {
+        this(config, VelocityFilterMode.ADAPTIVE_KALMAN);
+    }
+
+    protected BaseLocalizer(T config, VelocityFilterMode velocityFilterMode) {
+        this.config = config;
+        setVelocityFilterModeInternal(velocityFilterMode);
+    }
 
     /** @return the current factory estimate of the robot from the localizer */
     public Pose getPose() { return pose; }
@@ -80,6 +94,38 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
      *  @return the current raw acceleration estimate of the robot from the localizer
      */
     public Pose getRawAccel() { return rawAcceleration; }
+
+    /** @return the velocity filter's moving-average window size in samples */
+    public int getFilterWindowSize() { return FILTER_WINDOW_SIZE; }
+
+    public VelocityFilterMode getVelocityFilterMode() { return velocityFilterMode; }
+
+    /**
+     * Selects the canonical public velocity estimator. Changing modes clears only kinematic
+     * history; the current pose is preserved.
+     */
+    public void setVelocityFilterMode(VelocityFilterMode mode) {
+        if (mode == null || mode == velocityFilterMode) { return; }
+        setVelocityFilterModeInternal(mode);
+        resetKinematicEstimate(pose);
+    }
+
+    private void setVelocityFilterModeInternal(VelocityFilterMode mode) {
+        velocityFilterMode = mode == null ? VelocityFilterMode.ADAPTIVE_KALMAN : mode;
+        if (velocityFilterMode == VelocityFilterMode.ADAPTIVE_KALMAN) {
+            xFilter = new AdaptiveKalmanFilter();
+            yFilter = new AdaptiveKalmanFilter();
+            headingFilter = new AdaptiveKalmanFilter();
+            ((AdaptiveKalmanFilter) xFilter).setTuning(DEFAULT_TRANSLATION_KALMAN);
+            ((AdaptiveKalmanFilter) yFilter).setTuning(DEFAULT_TRANSLATION_KALMAN);
+            ((AdaptiveKalmanFilter) headingFilter).setTuning(DEFAULT_HEADING_KALMAN);
+        } else {
+            xFilter = new LowPassFilter();
+            yFilter = new LowPassFilter();
+            headingFilter = new LowPassFilter();
+            applyMovingAverageWindow();
+        }
+    }
 
     /**
      * Update the localizer's factory, velocity, and acceleration estimates. This method should be
@@ -111,15 +157,50 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
         double dt = (currentTimeNs - prevTimeNs) / 1_000_000_000.0;
         if (dt <= 1e-6) { return; }
 
-        rawVelocity = pose.minus(prevPose).div(dt);
+        applyVelocityMeasurement(pose.minus(prevPose).div(dt), updateType, dt);
+        prevPose = pose;
+        prevTimeNs = currentTimeNs;
+    }
+
+    /**
+     * Filters a native velocity measurement and derives acceleration from the same filter state.
+     * Localizers with hardware-provided velocity should use this instead of assigning
+     * {@link #velocity} directly.
+     */
+    protected void calculate(Pose measuredVelocity) {
+        long currentTimeNs = System.nanoTime();
+        if (prevTimeNs == -1) {
+            rawVelocity = measuredVelocity;
+            rawAcceleration = Pose.zero();
+            applyFilterState(UpdateType.BOTH);
+            prevPose = pose;
+            prevRawVelocity = measuredVelocity;
+            prevTimeNs = currentTimeNs;
+            return;
+        }
+
+        double dt = (currentTimeNs - prevTimeNs) / 1_000_000_000.0;
+        if (dt <= 1e-6) { return; }
+
+        applyVelocityMeasurement(measuredVelocity, UpdateType.BOTH, dt);
+        prevPose = pose;
+        prevTimeNs = currentTimeNs;
+    }
+
+    private void applyVelocityMeasurement(Pose measuredVelocity, UpdateType updateType,
+                                          double dt) {
+        rawVelocity = measuredVelocity;
         rawAcceleration = rawVelocity.minus(prevRawVelocity).div(dt);
+        applyFilterState(updateType);
+        prevRawVelocity = rawVelocity;
+    }
+
+    private void applyFilterState(UpdateType updateType) {
 
         // Update sample size if using LowPass
-        if (FILTER_WINDOW_SIZE != lastSize && !USE_KALMAN) {
-            ((LowPassFilter) xFilter).setSampleSize(FILTER_WINDOW_SIZE);
-            ((LowPassFilter) yFilter).setSampleSize(FILTER_WINDOW_SIZE);
-            ((LowPassFilter) headingFilter).setSampleSize(FILTER_WINDOW_SIZE);
-            lastSize = FILTER_WINDOW_SIZE;
+        if (FILTER_WINDOW_SIZE != lastSize
+                && velocityFilterMode == VelocityFilterMode.MOVING_AVERAGE) {
+            applyMovingAverageWindow();
         }
 
         // Filters MUST be updated every loop to maintain mathematical state continuity,
@@ -135,13 +216,6 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
             );
         }
 
-        if (isTuning && USE_KALMAN) {
-            boolean isMoving = Math.abs(velocity.getX().getIn()) > 1;
-            ((AdaptiveKalmanFilter) xFilter).setAutoTuning(isMoving);
-            ((AdaptiveKalmanFilter) yFilter).setAutoTuning(isMoving);
-            ((AdaptiveKalmanFilter) headingFilter).setAutoTuning(isMoving);
-        }
-
         if (updateType == UpdateType.BOTH || updateType == UpdateType.ACCELERATION) {
             acceleration = new Pose(
                     new Vector(Dist.fromIn(xState.rate()), Dist.fromIn(yState.rate())),
@@ -149,50 +223,82 @@ public abstract class BaseLocalizer<T extends BaseLocalizerConstants<T>> {
             );
         }
 
-        prevPose = pose;
-        prevRawVelocity = rawVelocity;
-        prevTimeNs = currentTimeNs;
+    }
+
+    /** Clears motion history after an odometry pose reset. */
+    protected void resetKinematicEstimate(Pose newPose) {
+        pose = newPose;
+        velocity = Pose.zero();
+        rawVelocity = Pose.zero();
+        acceleration = Pose.zero();
+        rawAcceleration = Pose.zero();
+        prevPose = newPose;
+        prevRawVelocity = Pose.zero();
+        prevTimeNs = -1;
+        xFilter.reset();
+        yFilter.reset();
+        headingFilter.reset();
     }
 
     public void setIsTuning(boolean isTuning) {
-        this.isTuning = isTuning;
-        if (!isTuning && USE_KALMAN) {
-            ((AdaptiveKalmanFilter) xFilter).setAutoTuning(false);
-            ((AdaptiveKalmanFilter) yFilter).setAutoTuning(false);
-            ((AdaptiveKalmanFilter) headingFilter).setAutoTuning(false);
-        }
+        setKalmanAutoTuning(isTuning, isTuning, isTuning);
     }
+
+    /** Enables one-time calibration independently for translation, strafe, and heading. */
+    public void setKalmanAutoTuning(boolean tuneX, boolean tuneY, boolean tuneHeading) {
+        if (velocityFilterMode != VelocityFilterMode.ADAPTIVE_KALMAN) {
+            isTuning = false;
+            return;
+        }
+        ((AdaptiveKalmanFilter) xFilter).setAutoTuning(tuneX);
+        ((AdaptiveKalmanFilter) yFilter).setAutoTuning(tuneY);
+        ((AdaptiveKalmanFilter) headingFilter).setAutoTuning(tuneHeading);
+        isTuning = tuneX || tuneY || tuneHeading;
+    }
+
+    public boolean isTuningVelocityFilter() { return isTuning; }
 
     // TUNING INJECTION/EXTRACTION
 
     public AdaptiveKalmanFilter.KalmanTuning getXKalmanTuning() {
-        return USE_KALMAN ? ((AdaptiveKalmanFilter) xFilter).getTuning() : null;
+        return kalman(xFilter) != null ? kalman(xFilter).getTuning() : null;
     }
 
     public void setXKalmanTuning(AdaptiveKalmanFilter.KalmanTuning tuning) {
-        if (USE_KALMAN && tuning != null) {
-            ((AdaptiveKalmanFilter) xFilter).setTuning(tuning);
+        if (kalman(xFilter) != null && tuning != null) {
+            kalman(xFilter).setTuning(tuning);
         }
     }
 
     public AdaptiveKalmanFilter.KalmanTuning getYKalmanTuning() {
-        return USE_KALMAN ? ((AdaptiveKalmanFilter) yFilter).getTuning() : null;
+        return kalman(yFilter) != null ? kalman(yFilter).getTuning() : null;
     }
 
     public void setYKalmanTuning(AdaptiveKalmanFilter.KalmanTuning tuning) {
-        if (USE_KALMAN && tuning != null) {
-            ((AdaptiveKalmanFilter) yFilter).setTuning(tuning);
+        if (kalman(yFilter) != null && tuning != null) {
+            kalman(yFilter).setTuning(tuning);
         }
     }
 
     public AdaptiveKalmanFilter.KalmanTuning getHeadingKalmanTuning() {
-        return USE_KALMAN ? ((AdaptiveKalmanFilter) headingFilter).getTuning() : null;
+        return kalman(headingFilter) != null ? kalman(headingFilter).getTuning() : null;
     }
 
     public void setHeadingKalmanTuning(AdaptiveKalmanFilter.KalmanTuning tuning) {
-        if (USE_KALMAN && tuning != null) {
-            ((AdaptiveKalmanFilter) headingFilter).setTuning(tuning);
+        if (kalman(headingFilter) != null && tuning != null) {
+            kalman(headingFilter).setTuning(tuning);
         }
+    }
+
+    private AdaptiveKalmanFilter kalman(DataFilter filter) {
+        return filter instanceof AdaptiveKalmanFilter ? (AdaptiveKalmanFilter) filter : null;
+    }
+
+    private void applyMovingAverageWindow() {
+        ((LowPassFilter) xFilter).setSampleSize(FILTER_WINDOW_SIZE);
+        ((LowPassFilter) yFilter).setSampleSize(FILTER_WINDOW_SIZE);
+        ((LowPassFilter) headingFilter).setSampleSize(FILTER_WINDOW_SIZE);
+        lastSize = FILTER_WINDOW_SIZE;
     }
 
     // TODO: Delete this temporary method once a value is settled on
