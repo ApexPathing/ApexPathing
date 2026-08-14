@@ -74,6 +74,7 @@ public class FollowerTuner extends LinearOpMode {
 
     @Override
     public void runOpMode() {
+        resetPhaseSelection();
         context = new TunerContext(this);
         context.setFollower(new Follower(new Constants(), hardwareMap, true));
         context.constants.drivetrainType = context.getFollower().getDrivetrain().getDrivetrainType();
@@ -83,14 +84,12 @@ public class FollowerTuner extends LinearOpMode {
 
         while (opModeInInit() && !isPhaseSelected) {
             context.updateDebugMode(true);
-            if (context.checkEmergencyStop()) { return; }
             isPhaseSelected = phaseSelector();
             sleep(20);
         }
 
         while (opModeInInit() && isPhaseSelected) {
             context.updateDebugMode(false);
-            if (context.checkEmergencyStop()) { return; }
             telemetry.clearAll();
             context.addInterfaceHeader();
             telemetry.addLine("Press Start to run the tuner.");
@@ -104,12 +103,12 @@ public class FollowerTuner extends LinearOpMode {
         // the user explicitly confirms a phase.
         while (opModeIsActive() && !isPhaseSelected) {
             context.updateDebugMode(true);
-            if (context.checkEmergencyStop()) { return; }
             isPhaseSelected = phaseSelector();
             sleep(20);
         }
         if (!opModeIsActive()) {
             context.getFollower().stop();
+            resetPhaseSelection();
             return;
         }
 
@@ -131,21 +130,22 @@ public class FollowerTuner extends LinearOpMode {
                 context.getFollower().setPose(Pose.zero());
                 selectedPhaseOrdinal = nextPhase;
                 selectPhase();
-            } else if (context.isEmergencyStopped()) {
-                break;
             }
         }
 
         context.getFollower().stop();
+        resetPhaseSelection();
     }
 
-    /** Loops through phases before the given phase to check if they have been tuned or not. */
+    /** A reused simulator OpMode instance must always reopen at the phase picker. */
+    private void resetPhaseSelection() {
+        selectedPhaseOrdinal = null;
+        phase = null;
+        isPhaseSelected = false;
+    }
+
+    /** Every phase remains selectable; completion state is informational, not a menu lock. */
     static boolean phaseAvailable(Phase phase) {
-        for (int i = 0; i < phase.ordinal(); i++) {
-            if (!phases[i].tuned) {
-                return false;
-            }
-        }
         return true;
     }
 
@@ -165,16 +165,11 @@ public class FollowerTuner extends LinearOpMode {
     }
 
     private boolean phaseSelector() {
-        String selectControl = Boolean.getBoolean(UNLOCK_PHASES_PROPERTY)
-                ? "B [left-bracket key]"
-                : "B";
         telemetry.clearAll();
         context.addInterfaceHeader();
         telemetry.addLine("Select a tuning phase");
-        telemetry.addLine("Use Dpad Up and Down to choose a phase, then press " +
-                selectControl + " to select it.");
+        telemetry.addLine("Use Dpad Up and Down to choose a phase, then press B to select it.");
         telemetry.addLine("Completed phases can be selected again for retuning.");
-        telemetry.addLine("Locked phases require every previous phase to be complete.");
         telemetry.addLine();
 
         for (int i = 0; i < phaseAmount; i++) {
@@ -186,13 +181,11 @@ public class FollowerTuner extends LinearOpMode {
         telemetry.update();
 
         if (gamepad1.dpadUpWasPressed()) {
-            do {
-                selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() - 1 + phaseAmount) % phaseAmount];
-            } while (!phaseAvailable(selectedPhaseOrdinal));
+            selectedPhaseOrdinal = phases[
+                    (selectedPhaseOrdinal.ordinal() - 1 + phaseAmount) % phaseAmount];
         } else if (gamepad1.dpadDownWasPressed()) {
-            do {
-                selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() + 1) % phaseAmount];
-            } while (!phaseAvailable(selectedPhaseOrdinal));
+            selectedPhaseOrdinal = phases[
+                    (selectedPhaseOrdinal.ordinal() + 1) % phaseAmount];
         } else if (gamepad1.bWasPressed() && phaseAvailable(selectedPhaseOrdinal)) {
             selectPhase();
             return true;
@@ -211,8 +204,7 @@ public class FollowerTuner extends LinearOpMode {
             telemetry.clearAll();
             context.addInterfaceHeader();
             telemetry.addLine("Next phase: " + phaseDisplayName(selectedPhaseOrdinal));
-            telemetry.addLine("Choose automatic/manual mode, then press " +
-                    (Boolean.getBoolean(UNLOCK_PHASES_PROPERTY) ? "A [; key]" : "A") + ".");
+            telemetry.addLine("Choose automatic/manual mode, then press A.");
             telemetry.update();
         } catch (Exception e) {
             // This won't happen because the setup is correct, but Java requires the catch.
@@ -250,7 +242,6 @@ public class FollowerTuner extends LinearOpMode {
             telemetry.update();
             while (opModeIsActive()) {
                 context.updateDebugMode(false);
-                if (context.checkEmergencyStop()) { return; }
                 sleep(50);
             }
             return;

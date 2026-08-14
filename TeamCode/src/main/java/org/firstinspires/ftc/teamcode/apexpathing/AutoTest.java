@@ -41,8 +41,7 @@ public class AutoTest extends LinearOpMode {
         STRAFE_OUT,
         STRAFE_BACK,
         COMPLETE,
-        FAILED,
-        ABORTED
+        FAILED
     }
 
     @Override
@@ -51,7 +50,6 @@ public class AutoTest extends LinearOpMode {
         path = new ExampleAutoPath(follower, GeometryFactory.PoseMirror.NONE);
 
         telemetry.addLine("Apex follower self-test: curve, turn, reverse return, and strafe.");
-        telemetry.addLine("Use B to abort and stop all robot movement.");
         telemetry.addLine("Press Start to begin");
         telemetry.update();
 
@@ -67,11 +65,7 @@ public class AutoTest extends LinearOpMode {
             maximumCrossTrackError = Math.max(maximumCrossTrackError,
                     Math.abs(follower.getCrossTrackErrorIn()));
 
-            if (gamepad1.b && !isTerminal(currentState)) {
-                follower.stop();
-                currentState = AutoState.ABORTED;
-                failureReason = "Stopped by operator";
-            } else if (!isTerminal(currentState)) {
+            if (!isTerminal(currentState)) {
                 if (stageTimer.seconds() > STAGE_TIMEOUT_SECONDS) {
                     fail(follower, "Stage exceeded " + STAGE_TIMEOUT_SECONDS + " seconds");
                 } else if (!follower.isBusy()) {
@@ -83,8 +77,6 @@ public class AutoTest extends LinearOpMode {
                 telemetry.addLine("PASS: all Apex follower checks completed.");
             } else if (currentState == AutoState.FAILED) {
                 telemetry.addLine("FAIL: " + failureReason);
-            } else if (currentState == AutoState.ABORTED) {
-                telemetry.addLine("ABORTED: robot stopped.");
             }
 
             telemetry.addData("Current check", currentState);
@@ -192,7 +184,6 @@ public class AutoTest extends LinearOpMode {
     }
 
     private static boolean isTerminal(AutoState state) {
-        return state == AutoState.COMPLETE || state == AutoState.FAILED ||
-                state == AutoState.ABORTED;
+        return state == AutoState.COMPLETE || state == AutoState.FAILED;
     }
 }

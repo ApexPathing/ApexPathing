@@ -14,6 +14,10 @@ at least once before launching FTCodeSim. In PowerShell, run:
   --tests org.firstinspires.ftc.teamcode.sim.SimulateApexPathing
 ```
 
+Before running it, set `RUN_INTERACTIVE_SIMULATOR` to `true` in
+`SimulateApexPathing.java`. Set it back to `false` afterward so ordinary unit-test runs do not wait
+indefinitely for the interactive simulator windows to close.
+
 The simulated Driver Station presents `Apex Auto Test`, `Apex TeleOp Test`, and `Follower Tuner`.
 Select one, then press Init and Start; FTCodeSim initializes and runs only that selected OpMode.
 Stop it before selecting another. This is an interactive JUnit test and remains active until the
@@ -29,9 +33,10 @@ phases so any phase can be selected as the starting point. After a phase's resul
 Follower Tuner saves them and advances through every remaining phase in order. The simulation asks
 you to use the red Stop button only after the final Velocity Feedback phase is complete.
 
-Automatic PDS tuning uses a bounded relay-feedback test, rejects inconsistent oscillations, and
-then validates the resulting gains with a capped point-to-point move. PDS and feedforward runs save
+Automatic PDS tuning uses repeated bounded point-to-point tests and central finite differences to
+refine kP and kD. It scores time-weighted squared position error, backs off after worse updates, and
+restores the best measured gains before operator validation. PDS and feedforward runs save
 graph-ready CSV files beside `constants.json` (`FIRST/ApexPathing` on the Robot Controller and
 `build/ftcodesim-data` in desktop simulation). Feedforward CSV rows include measured velocity and
-acceleration plus fitted power and residuals; PDS CSV rows include target, position, error,
-velocity, and commanded power over time.
+acceleration plus fitted power and residuals; PDS CSV rows include gains, trial cost, target,
+position, error, velocity, commanded power, and safeguard status over time.

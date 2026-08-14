@@ -9,6 +9,9 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.Locale;
 
 import core.ApexStorage;
 import core.Follower;
@@ -24,6 +27,8 @@ import geometry.Pose;
  */
 public class TunerContext {
     private static final long DEBUG_HOLD_NANOS = 1_500_000_000L;
+    private static final DecimalFormat NORMAL_NUMBER_FORMAT = new DecimalFormat(
+            "0.#####", DecimalFormatSymbols.getInstance(Locale.US));
 
     private final LinearOpMode opMode;
     private Follower follower;
@@ -31,7 +36,6 @@ public class TunerContext {
     private boolean debugMode;
     private boolean debugHoldHandled;
     private long debugHoldStartedNanos;
-    private boolean emergencyStopped;
 
     public TunerContext(LinearOpMode opMode) { this.opMode = opMode; }
 
@@ -50,21 +54,15 @@ public class TunerContext {
 
     boolean retuneButtonWasPressed() { return opMode.gamepad1.bWasPressed(); }
 
-    String control(String button) {
-        if (!Boolean.getBoolean("apex.simulation.unlockTunerPhases")) { return button; }
-        switch (button) {
-            case "A": return "A [; key]";
-            case "B": return "B [left-bracket key]";
-            case "X": return "X [P key]";
-            case "Y": return "Y [- key]";
-            case "BACK": return "Back [Tab key]";
-            default: return button;
-        }
-    }
-
     public boolean isDebugMode() { return debugMode; }
 
-    public boolean isEmergencyStopped() { return emergencyStopped; }
+    /** Keeps normal telemetry compact while preserving full precision in debug mode. */
+    public String formatNumber(double value) {
+        if (debugMode) { return Double.toString(value); }
+        synchronized (NORMAL_NUMBER_FORMAT) {
+            return NORMAL_NUMBER_FORMAT.format(value);
+        }
+    }
 
     /** Debug can be enabled only from the phase menu, but may be disabled from any screen. */
     public void updateDebugMode(boolean allowEnable) {
@@ -88,31 +86,13 @@ public class TunerContext {
         }
     }
 
-    /** Stops all drivetrain output and terminates the tuner when Back is pressed. */
-    public boolean checkEmergencyStop() {
-        if (emergencyStopped) { return true; }
-        if (!opMode.gamepad1.backWasPressed()) { return false; }
-
-        emergencyStopped = true;
-        if (follower != null) { follower.stop(); }
-        getTelemetry().clearAll();
-        getTelemetry().addLine("EMERGENCY STOP ACTIVATED");
-        getTelemetry().addLine("All drivetrain output has been stopped.");
-        getTelemetry().update();
-        opMode.requestOpModeStop();
-        return true;
-    }
-
     /** Adds controls which must remain visible independently of the current phase. */
     public void addInterfaceHeader() {
-        boolean simulation = Boolean.getBoolean("apex.simulation.unlockTunerPhases");
-        getTelemetry().addLine("E-STOP: Back button" + (simulation ? " [Tab key]" : ""));
         if (debugMode) {
             getTelemetry().addLine("DEBUG MODE");
-            getTelemetry().addLine("Hold Right Stick Button" +
-                    (simulation ? " [comma key]" : "") + " to exit debug mode.");
+            getTelemetry().addLine("Hold Right Stick Button to exit debug mode.");
         }
-        getTelemetry().addLine();
+        if (debugMode) { getTelemetry().addLine(); }
     }
 
     /** Teleports only FTCodeSim; real hardware must still be positioned by its operator. */

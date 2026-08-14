@@ -25,7 +25,5 @@ public class AutoTestSequenceTest {
                 AutoTest.nextState(AutoTest.AutoState.COMPLETE));
         assertEquals(AutoTest.AutoState.FAILED,
                 AutoTest.nextState(AutoTest.AutoState.FAILED));
-        assertEquals(AutoTest.AutoState.ABORTED,
-                AutoTest.nextState(AutoTest.AutoState.ABORTED));
     }
 }

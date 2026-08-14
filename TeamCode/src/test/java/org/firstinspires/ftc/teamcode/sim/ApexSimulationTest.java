@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.sim;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -24,10 +25,13 @@ import org.junit.Test;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.io.File;
+import java.io.FileWriter;
 
 import core.Follower;
 import core.FollowerConstants;
 import core.FollowerDiagnostics;
+import feedforward.MotionParameters;
 import controllers.PDSController.PDSCoefficients;
 import drivetrains.BaseDrivetrain;
 import geometry.Pose;
@@ -36,6 +40,17 @@ import localizers.Pinpoint;
 import paths.movements.Path;
 
 public class ApexSimulationTest {
+    @Test
+    public void degenerateReverseProfileFallsBackToClosedLoopFollowing() {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        configureKnownFollowerConstants();
+        Follower follower = new Follower(new Constants(), hardware.hardwareMap);
+        ExampleAutoPath auto = new ExampleAutoPath(follower, GeometryFactory.PoseMirror.NONE);
+
+        assertNull("An all-zero profile should fall back to closed-loop following",
+                auto.returnPath.getFeedforwardLut());
+    }
+
     @Test
     public void registersEveryOpMode() {
         Set<Class<?>> registeredClasses = new HashSet<>();
@@ -234,14 +249,17 @@ public class ApexSimulationTest {
         follower.follow(auto.testPath);
         follower.update();
         assertEquals("Callback not triggered yet", auto.callbackMessage);
-        double outboundCrossTrack = runMovement(hardware, follower, 12.0);
-        feedforward.MotionParameters first = auto.testPath.getFeedforwardLut().getFFParams(0.0);
+        // The example now contains several large arcs and is intentionally much longer than the
+        // original three-point path. Give the complete profiled route time to finish.
+        double outboundCrossTrack = runMovement(hardware, follower, 22.0);
+        feedforward.MotionParameters first = auto.testPath.getFeedforwardLut() == null ? null :
+                auto.testPath.getFeedforwardLut().getFFParams(0.0);
         assertTrue("Example auto path did not finish: pose=" + follower.getPose() +
                 ", t=" + follower.getBestT() +
                 ", crossTrack=" + follower.getCrossTrackErrorIn() +
                 ", velocity=" + follower.getVelocity() +
-                ", firstV=" + first.getTangentialVel() +
-                ", firstA=" + first.getTangentialAccel() +
+                ", firstV=" + (first == null ? "quick-fallback" : first.getTangentialVel()) +
+                ", firstA=" + (first == null ? "quick-fallback" : first.getTangentialAccel()) +
                 ", powers=" + follower.getDrivetrain().getLastFlPower() + "," +
                 follower.getDrivetrain().getLastFrPower() + "," +
                 follower.getDrivetrain().getLastBlPower() + "," +
@@ -267,7 +285,14 @@ public class ApexSimulationTest {
 
         follower.follow(auto.returnPath);
         double returnCrossTrack = runMovement(hardware, follower, 12.0);
-        assertTrue("Reverse return path did not finish", !follower.isBusy());
+        assertTrue("Reverse return path did not finish: pose=" + follower.getPose() +
+                ", t=" + follower.getBestT() +
+                ", crossTrack=" + follower.getCrossTrackErrorIn() +
+                ", velocity=" + follower.getVelocity() +
+                ", powers=" + follower.getDrivetrain().getLastFlPower() + "," +
+                follower.getDrivetrain().getLastFrPower() + "," +
+                follower.getDrivetrain().getLastBlPower() + "," +
+                follower.getDrivetrain().getLastBrPower(), !follower.isBusy());
         assertTrue("Reverse return path stopped too far from home: " + follower.getPose(),
                 follower.getPose().distanceTo(auto.returnPath.getEndPose()).getIn() < 1.0);
         assertTrue("Reverse return path ended at the wrong heading",
@@ -355,6 +380,63 @@ public class ApexSimulationTest {
         }
     }
 
+    @Test
+    public void exportProfiledTurnVelocityResponse() throws Exception {
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        configureKnownFollowerConstants();
+        Follower follower = new Follower(new Constants(), hardware.hardwareMap);
+        GeometryFactory factory = new GeometryFactory(follower)
+                .setDistUnit(geometry.DistUnit.IN)
+                .setAngleUnit(geometry.AngleUnit.DEG);
+        Pose start = factory.pose(-24, 0, 0);
+        paths.movements.Turn turn = factory.turn(start)
+                .turnTo(factory.angle(90)).profiledBuild();
+        File reportDirectory = new File(System.getProperty("user.dir"), "build/reports");
+        assertTrue(reportDirectory.exists() || reportDirectory.mkdirs());
+        File csv = new File(reportDirectory, "profiled-turn-velocity.csv");
+
+        follower.setPose(start);
+        follower.follow(turn);
+        FileWriter writer = new FileWriter(csv);
+        double minimumVelocity = Double.POSITIVE_INFINITY;
+        double elapsed = 0.0;
+        try {
+            writer.write("time_s,position_rad,remaining_rad,target_velocity_rad_s," +
+                    "actual_velocity_rad_s,target_acceleration_rad_s2,power_fl,power_fr," +
+                    "power_bl,power_br\n");
+            while (follower.isBusy() && elapsed < 8.0) {
+                stepPhysics(hardware, 0.02);
+                follower.update();
+                double position = Math.max(0.0, turn.getStartPose().getHeading()
+                        .getShortestAngleTo(follower.getPose().getHeading()).getRad());
+                MotionParameters target = turn.getFeedforwardLut().getFFParams(position);
+                minimumVelocity = Math.min(minimumVelocity,
+                        follower.getVelocity().getHeading().getRad());
+                double remaining = Math.abs(follower.getPose().getHeading()
+                        .getShortestAngleTo(turn.getEndPose().getHeading()).getRad());
+                writer.write(String.format(java.util.Locale.US,
+                        "%.4f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f%n",
+                        elapsed, position, remaining, target.getAngularVel(),
+                        follower.getVelocity().getHeading().getRad(),
+                        target.getAngularAccel(),
+                        follower.getDrivetrain().getLastFlPower(),
+                        follower.getDrivetrain().getLastFrPower(),
+                        follower.getDrivetrain().getLastBlPower(),
+                        follower.getDrivetrain().getLastBrPower()));
+                elapsed += 0.02;
+                Thread.sleep(20);
+            }
+        } finally {
+            writer.close();
+        }
+        assertTrue("Profiled turn did not finish; response CSV=" + csv.getAbsolutePath(),
+                !follower.isBusy());
+        assertTrue("Profiled turn reversed direction; response CSV=" + csv.getAbsolutePath(),
+                minimumVelocity >= -0.02);
+        assertTrue("Profiled turn took too long to settle; response CSV=" +
+                csv.getAbsolutePath(), elapsed <= 1.5);
+    }
+
     private static void runVelocityFeedbackAngularTrial(double gain) throws Exception {
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         configureKnownFollowerConstants();
@@ -380,13 +462,13 @@ public class ApexSimulationTest {
 
         follower.setPose(start);
         follower.follow(outbound);
-        runMovement(hardware, follower, 8.0);
+        assertTurnDoesNotStopAndRestart(hardware, follower, outbound, 8.0);
         assertTrue("Velocity-feedback outbound turn did not finish at gain " + gain + ": " +
                         follower.getPose(),
                 !follower.isBusy());
 
         follower.follow(returning);
-        runMovement(hardware, follower, 8.0);
+        assertTurnDoesNotStopAndRestart(hardware, follower, returning, 8.0);
         assertTrue("Velocity-feedback return turn did not finish at gain " + gain + ": " +
                         follower.getPose(),
                 !follower.isBusy());
@@ -441,17 +523,17 @@ public class ApexSimulationTest {
 
     private static void configureKnownFollowerConstants() {
         FollowerConstants constants = FollowerConstants.getInstance();
-        constants.angularCoeffs = new PDSCoefficients(3.32, 0.34, 0.24375);
-        constants.translationalCoeffs = new PDSCoefficients(0.149, 0.024, 0.24375);
-        constants.translationalKV = 0.01466;
-        constants.translationalKA = 0.00716;
-        constants.angularKV = 0.1364;
-        constants.angularKA = 0.0648;
-        constants.velocityFeedbackGain = 0.0;
-        constants.angularVelocityFeedbackGain = 0.0;
-        constants.kCentripetal = 0.0072;
-        constants.forwardVelLimitIn = 64.8;
-        constants.forwardAccelLimitIn = 132.6;
+        constants.angularCoeffs = new PDSCoefficients(3.130238282794052, 0.44422514288504944, 0.23125);
+        constants.translationalCoeffs = new PDSCoefficients(0.11877226292167513, 0.028499409724280098, 0.23125);
+        constants.translationalKV = 0.0071221715453131966;
+        constants.translationalKA = 0.004660337129387047;
+        constants.angularKV = 0.06566610479427347;
+        constants.angularKA = 0.04305298771810743;
+        constants.velocityFeedbackGain = 0.05926269306719753;
+        constants.angularVelocityFeedbackGain = 1.664473280244918;
+        constants.kCentripetal = 0.006116371767550798;
+        constants.forwardVelLimitIn = 64.67997142368108;
+        constants.forwardAccelLimitIn = 105.65980741005704;
         constants.strafeVelLimitIn = 53.6;
         constants.strafeAccelLimitIn = 94.8;
         constants.angularVelLimitRad = 6.96;
@@ -497,6 +579,38 @@ public class ApexSimulationTest {
             Thread.sleep(20);
         }
         return maximumCrossTrackError;
+    }
+
+    private static void assertTurnDoesNotStopAndRestart(ApexSimulation.Hardware hardware,
+                                                         Follower follower,
+                                                         paths.movements.Turn turn,
+                                                         double timeoutSeconds) throws Exception {
+        long deadline = System.nanoTime() + (long) (timeoutSeconds * 1e9);
+        int stoppedShortFrames = 0;
+        boolean movedMeaningfully = false;
+        boolean stoppedShort = false;
+        while (follower.isBusy() && System.nanoTime() < deadline) {
+            stepPhysics(hardware, 0.02);
+            follower.update();
+
+            double traveled = Math.abs(turn.getStartPose().getHeading()
+                    .getShortestAngleTo(follower.getPose().getHeading()).getRad());
+            double remaining = Math.abs(follower.getPose().getHeading()
+                    .getShortestAngleTo(turn.getEndPose().getHeading()).getRad());
+            double speed = Math.abs(follower.getVelocity().getHeading().getRad());
+            movedMeaningfully |= traveled > Math.toRadians(10.0);
+            if (movedMeaningfully && remaining > Math.toRadians(2.0) && speed < 0.03) {
+                stoppedShortFrames++;
+                stoppedShort |= stoppedShortFrames >= 4;
+            } else if (speed >= 0.03) {
+                stoppedShortFrames = 0;
+            }
+            if (stoppedShort && speed > 0.10) {
+                throw new AssertionError("Profiled turn stopped short and restarted at pose " +
+                        follower.getPose());
+            }
+            Thread.sleep(20);
+        }
     }
 
     private static void stepPhysics(ApexSimulation.Hardware hardware, double dt) throws Exception {

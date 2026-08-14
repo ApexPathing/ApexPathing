@@ -1,6 +1,7 @@
 package org.firstinspires.ftc.teamcode.apexpathing;
 
 import core.Follower;
+import geometry.Angle;
 import geometry.Pose;
 import paths.heading.InterpolationStyle;
 import paths.movements.Path;
@@ -49,23 +50,27 @@ public class ExampleAutoPath {
 
     private void build() {
         testPath = factory.path(startPose, // Forward and left curve
-                        factory.pose(20, 0),
-                        factory.pose(40, 20),
-                        factory.pose(45, 25, 120)
+                        factory.arcPose(30, 0, 10),
+                        factory.arcPose(30, -30, 10),
+                        factory.arcPose(-30, -30, 10),
+                        factory.arcPose(-30, 30, 10),
+                        factory.pose(30, 30, -90)
                 )
-                .interpolateWith(InterpolationStyle.SMOOTH_START_TO_END)
+                .addHeadingNode(0.25, Angle.fromDeg(90))
+                .addHeadingNode(0.5, Angle.fromDeg(-90))
+                .addHeadingNode(0.75, Angle.fromDeg(90))
                 .addDistanceCallback(0.5, this::exampleDistanceCallback)
-                .profiledBuild();
+                .quickBuild();
 
         testTurn = factory.turn(testPath.getEndPose())
-                .turnTo(factory.angle(45))
-                .addAngularCallback(factory.angle(90), this::exampleAngularCallback)
+                .turnTo(factory.angle(0))
+                .addAngularCallback(factory.angle(-45), this::exampleAngularCallback)
                 .quickBuild();
 
         // Exercise reverse tangent following on a profiled curve and bring the robot home. This
         // catches backward-heading and terminal-profile regressions that the outbound path cannot.
         returnPath = factory.path(testTurn.getEndPose(),
-                        factory.pose(28, 5),
+                        factory.pose(0, 30),
                         startPose
                 )
                 .interpolateWith(InterpolationStyle.TANGENT_BACKWARD)

@@ -27,6 +27,8 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private static final int SEARCH_ROUNDS = 4;
     private static final double DIRECTION_TIMEOUT_SECONDS = 12.0;
     private static final double SAMPLE_EDGE_FRACTION = 0.10;
+    /** Prevents angular velocity feedback from becoming a noisy bang-bang controller. */
+    public static double MAX_ANGULAR_FEEDBACK_GAIN = 0.25;
 
     enum FeedbackAxis { TRANSLATION, ANGULAR }
 
@@ -50,6 +52,12 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private double lastScore;
     private double translationScore;
     private double angularScore;
+    private double bestTranslationScore = Double.POSITIVE_INFINITY;
+    private double bestAngularScore = Double.POSITIVE_INFINITY;
+    private boolean manualTestRunning;
+    private int manualTestNumber;
+    private TuningCsvWriter manualCsv;
+    private String manualCsvPath = "Not started";
     private final ElapsedTime directionTimer = new ElapsedTime();
 
     public VelocityFeedbackPhase(TunerContext context) { super(context); }
@@ -64,6 +72,16 @@ public class VelocityFeedbackPhase extends TuningPhase {
     protected boolean autoTuneIsPossible() { return true; }
 
     @Override
+    protected void showPreRunInstructions() {
+        context.getTelemetry().addLine(
+                "Translation needs a clear 48-inch out-and-back lane.");
+        context.getTelemetry().addLine(
+                "Angular feedback needs room for a 90-degree out-and-back turn.");
+        context.getTelemetry().addLine(
+                "Manual tests remain stopped until X is pressed.");
+    }
+
+    @Override
     protected void init() {
         if (context.constants.velocityFeedbackGain <= 0.0 &&
                 context.constants.translationalCoeffs.kD > 0.0) {
@@ -73,6 +91,8 @@ public class VelocityFeedbackPhase extends TuningPhase {
                 context.constants.angularCoeffs.kD > 0.0) {
             context.constants.angularVelocityFeedbackGain = context.constants.angularCoeffs.kD;
         }
+        context.constants.angularVelocityFeedbackGain = Math.min(
+                context.constants.angularVelocityFeedbackGain, MAX_ANGULAR_FEEDBACK_GAIN);
         applyCurrentGains();
 
         GeometryFactory factory = new GeometryFactory(context.getFollower())
@@ -97,7 +117,13 @@ public class VelocityFeedbackPhase extends TuningPhase {
 
         axis = FeedbackAxis.TRANSLATION;
         if (manualMode) {
-            startTest();
+            context.getFollower().stop();
+            manualTestRunning = false;
+            manualTestNumber = 0;
+            manualCsv = TuningCsvWriter.open("manual_velocity_feedback",
+                    "test", "time_s", "axis", "direction", "gain",
+                    "target_velocity", "actual_velocity", "error");
+            manualCsvPath = manualCsv.getPath();
         } else {
             startSearch(FeedbackAxis.TRANSLATION);
         }
@@ -113,7 +139,8 @@ public class VelocityFeedbackPhase extends TuningPhase {
     private void startSearch(FeedbackAxis nextAxis) {
         axis = nextAxis;
         center = (axis == FeedbackAxis.TRANSLATION) ? context.constants.velocityFeedbackGain :
-                context.constants.angularVelocityFeedbackGain;
+                Math.min(context.constants.angularVelocityFeedbackGain,
+                        MAX_ANGULAR_FEEDBACK_GAIN);
         double feedforward = (axis == FeedbackAxis.TRANSLATION) ?
                 context.constants.translationalKV : context.constants.angularKV;
 
@@ -128,6 +155,11 @@ public class VelocityFeedbackPhase extends TuningPhase {
         gains[0] = Math.max(0.0, center - step);
         gains[1] = center;
         gains[2] = center + step;
+        if (axis == FeedbackAxis.ANGULAR) {
+            for (int i = 0; i < gains.length; i++) {
+                gains[i] = Math.min(gains[i], MAX_ANGULAR_FEEDBACK_GAIN);
+            }
+        }
         candidate = 0;
         startCandidate();
     }
@@ -178,6 +210,7 @@ public class VelocityFeedbackPhase extends TuningPhase {
             if (isUsableTranslationSample(
                     desired.getTangentialVel(), traveled, segment.getLengthIn())) {
                 addError(desired.getTangentialVel(), actual, 1.0);
+                logManualSample(desired.getTangentialVel(), actual);
             }
         } else {
             Turn turn = (Turn) currentMovement;
@@ -188,7 +221,18 @@ public class VelocityFeedbackPhase extends TuningPhase {
                     .getFFParams(traveled);
             double actual = context.getFollower().getVelocity().getHeading().getRad();
             addError(desired.getAngularVel(), actual, 0.05);
+            logManualSample(desired.getAngularVel(), actual);
         }
+    }
+
+    private void logManualSample(double target, double actual) {
+        if (!manualMode || !manualTestRunning || manualCsv == null) { return; }
+        double gain = axis == FeedbackAxis.TRANSLATION
+                ? context.constants.velocityFeedbackGain
+                : context.constants.angularVelocityFeedbackGain;
+        manualCsv.writeRow(manualTestNumber, directionTimer.seconds(), axis,
+                forwardIsRunning ? "OUTBOUND" : "RETURN", gain,
+                target, actual, target - actual);
     }
 
     private void addError(double target, double actual, double minimumTarget) {
@@ -328,9 +372,10 @@ public class VelocityFeedbackPhase extends TuningPhase {
     @Override
     protected boolean manualTuned() {
         if (opMode.gamepad1.leftBumperWasPressed() || opMode.gamepad1.rightBumperWasPressed()) {
+            context.getFollower().stop();
+            manualTestRunning = false;
             axis = (axis == FeedbackAxis.TRANSLATION) ?
                     FeedbackAxis.ANGULAR : FeedbackAxis.TRANSLATION;
-            startTest();
         }
 
         double change = manualChange();
@@ -340,33 +385,52 @@ public class VelocityFeedbackPhase extends TuningPhase {
                         context.constants.velocityFeedbackGain + change);
             } else {
                 context.constants.angularVelocityFeedbackGain = Math.max(0.0,
-                        context.constants.angularVelocityFeedbackGain + change);
+                        Math.min(MAX_ANGULAR_FEEDBACK_GAIN,
+                                context.constants.angularVelocityFeedbackGain + change));
             }
             applyCurrentGains();
-            startTest();
+            if (manualTestRunning) { restartManualTest(); }
         } else if (opMode.gamepad1.xWasPressed()) {
-            startTest();
-        } else if (updateTest()) {
+            restartManualTest();
+        } else if (manualTestRunning && updateTest()) {
             if (axis == FeedbackAxis.TRANSLATION) {
                 translationScore = lastScore;
+                bestTranslationScore = Math.min(bestTranslationScore, lastScore);
             } else {
                 angularScore = lastScore;
+                bestAngularScore = Math.min(bestAngularScore, lastScore);
             }
-            startTest();
+            manualTestRunning = false;
+            context.getFollower().stop();
         }
 
-        context.getTelemetry().addData("Selected", axis.name());
-        reportResults();
-        context.getTelemetry().addData("Increment", increment);
-        context.getTelemetry().addLine("Up/Down: change value");
-        context.getTelemetry().addLine("Left/Right: change increment");
+        addTunableValue("Translation feedback", context.constants.velocityFeedbackGain,
+                axis == FeedbackAxis.TRANSLATION);
+        addTunableValue("Angular feedback", context.constants.angularVelocityFeedbackGain,
+                axis == FeedbackAxis.ANGULAR);
+        context.getTelemetry().addData("Increment", number(increment));
+        context.getTelemetry().addData("Final RMS error",
+                number(axis == FeedbackAxis.TRANSLATION ? translationScore : angularScore));
+        if (context.isDebugMode()) {
+            context.getTelemetry().addData("Test state", manualTestRunning
+                    ? actionDescription() : "IDLE - press X to run");
+            context.getTelemetry().addData("Usable samples", errorSamples);
+            context.getTelemetry().addData("Live RMS error", errorSamples == 0
+                    ? Double.NaN : Math.sqrt(errorSquared / errorSamples));
+            context.getTelemetry().addData("Best translation RMS", bestTranslationScore);
+            context.getTelemetry().addData("Best angular RMS", bestAngularScore);
+            context.getTelemetry().addData("Response CSV", manualCsvPath);
+        }
+        context.getTelemetry().addLine("Dpad Up/Down: change value");
         context.getTelemetry().addLine("LB/RB: select value");
-        context.getTelemetry().addLine(control("X") + ": restart test");
-        context.getTelemetry().addLine(control("A") + ": save");
+        context.getTelemetry().addLine("X: run/restart test");
+        context.getTelemetry().addLine("A: save");
         context.getTelemetry().update();
 
         if (opMode.gamepad1.aWasPressed()) {
             context.getFollower().stop();
+            manualTestRunning = false;
+            if (manualCsv != null) { manualCsv.close(); }
             return true;
         }
 
@@ -376,13 +440,18 @@ public class VelocityFeedbackPhase extends TuningPhase {
     @Override
     protected void reportResults() {
         context.getTelemetry().addData("Translation feedback gain",
-                context.constants.velocityFeedbackGain);
+                number(context.constants.velocityFeedbackGain));
         context.getTelemetry().addData("Angular feedback gain",
-                context.constants.angularVelocityFeedbackGain);
-        if (context.isDebugMode()) {
-            context.getTelemetry().addData("Translation root mean square error", translationScore);
-            context.getTelemetry().addData("Angular root mean square error", angularScore);
-        }
+                number(context.constants.angularVelocityFeedbackGain));
+        context.getTelemetry().addData("Translation root mean square error", number(translationScore));
+        context.getTelemetry().addData("Angular root mean square error", number(angularScore));
+    }
+
+    private void restartManualTest() {
+        context.getFollower().stop();
+        manualTestNumber++;
+        startTest();
+        manualTestRunning = true;
     }
 
     static boolean isUsableTranslationSample(double targetVelocity, double traveled,

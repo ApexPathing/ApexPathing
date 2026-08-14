@@ -29,6 +29,50 @@ public class ApexAdvantageScopeLayoutTest {
                 "RealOutputs/Drivetrain/position ftc coords (m)");
         assertSource(tabs.get(1), "trajectory", "Pose2d[]",
                 "RealOutputs/Apex/CurrentPath");
+        assertEquals("robot", tabs.get(1).path("controller").path("sources")
+                .path(0).path("type").asText());
+        assertEquals("trajectory", tabs.get(1).path("controller").path("sources")
+                .path(1).path("type").asText());
+        assertEquals("normal", tabs.get(1).path("controller").path("sources")
+                .path(1).path("options").path("size").asText());
+    }
+
+    @Test
+    public void movesAnExistingPathBelowTheRobot() {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root = layoutWithThreeDimensionalTab(mapper);
+        ObjectNode tab = (ObjectNode) root.path("hubs").path(0).path("state")
+                .path("tabs").path("tabs").path(0);
+        ArrayNode sources = (ArrayNode) tab.path("controller").path("sources");
+        sources.add(source(mapper, "robot", "robot-key", "Pose2d"));
+        sources.add(source(mapper, "trajectory", "RealOutputs/Apex/CurrentPath", "Pose2d[]"));
+
+        assertTrue(ApexAdvantageScopeLayout.configure(root, mapper));
+        assertEquals("robot", sources.path(0).path("type").asText());
+        assertEquals("trajectory", sources.path(1).path("type").asText());
+        assertEquals("normal", sources.path(1).path("options").path("size").asText());
+    }
+
+    @Test
+    public void convertsLegacyGhostPathIntoTrajectoryInExistingFieldTabs() {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root = layoutWithThreeDimensionalTab(mapper);
+        ArrayNode tabs = (ArrayNode) root.path("hubs").path(0).path("state")
+                .path("tabs").path("tabs");
+        ObjectNode controller = mapper.createObjectNode();
+        ArrayNode sources = mapper.createArrayNode();
+        sources.add(source(mapper, "robot", "robot-key", "Pose2d"));
+        sources.add(source(mapper, "ghost", "RealOutputs/Apex/CurrentPath", "Pose2d[]"));
+        controller.set("sources", sources);
+        ObjectNode existingField = mapper.createObjectNode();
+        existingField.put("type", 2);
+        existingField.put("title", "2D Field");
+        existingField.set("controller", controller);
+        tabs.add(existingField);
+
+        assertTrue(ApexAdvantageScopeLayout.configure(root, mapper));
+        assertEquals("trajectory", sources.path(1).path("type").asText());
+        assertEquals("normal", sources.path(1).path("options").path("size").asText());
     }
 
     private static ObjectNode layoutWithThreeDimensionalTab(ObjectMapper mapper) {
@@ -66,5 +110,15 @@ public class ApexAdvantageScopeLayoutTest {
             }
         }
         throw new AssertionError("Missing " + type + " source " + logKey);
+    }
+
+    private static ObjectNode source(ObjectMapper mapper, String type, String logKey,
+                                     String logType) {
+        ObjectNode source = mapper.createObjectNode();
+        source.put("type", type);
+        source.put("logKey", logKey);
+        source.put("logType", logType);
+        source.set("options", mapper.createObjectNode());
+        return source;
     }
 }

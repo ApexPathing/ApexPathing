@@ -7,6 +7,7 @@ import java.util.List;
 import core.FollowerConstants;
 import drivetrains.BaseDrivetrain;
 import feedforward.FFLut;
+import feedforward.MotionParameters;
 import feedforward.generators.BaseProfileGenerator;
 import feedforward.generators.MecanumProfileGenerator;
 import feedforward.generators.SwerveProfileGenerator;
@@ -389,8 +390,24 @@ public class HolonomicPathBuilder extends PathBuilder<HolonomicPathBuilder> {
         } else {
             generator = new MecanumProfileGenerator(constants, path);
         }
-        path.setFeedforwardLut(new FFLut(generator.generate()));
+        MotionParameters[] profile = generator.generate();
+        if (hasUsableStartup(profile)) {
+            path.setFeedforwardLut(new FFLut(profile));
+        } else {
+            // A degenerate profile must not leave an otherwise valid path permanently stationary.
+            // Quick following remains bounded by the drivetrain velocity limit and endpoint PDS.
+            path.setFeedforwardLut(null);
+            path.addWarning("APEX WARNING: Motion profile contained no movement; falling back " +
+                    "to closed-loop quick following.");
+        }
 
         return path;
+    }
+
+    private static boolean hasUsableStartup(MotionParameters[] profile) {
+        if (profile == null || profile.length == 0) { return false; }
+        MotionParameters start = profile[0];
+        return start != null && (Math.abs(start.getTangentialVel()) > EPSILON ||
+                Math.abs(start.getTangentialAccel()) > EPSILON);
     }
 }

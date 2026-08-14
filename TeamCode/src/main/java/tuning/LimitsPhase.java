@@ -344,8 +344,8 @@ public class LimitsPhase extends TuningPhase {
                         ? "Allow a full clear rotation around the robot."
                         : "Allow at least 72 inches of clear travel (the powered run stops by 60)."
                 );
-                context.getTelemetry().addLine("Press " + control("A") +
-                        " when the robot is stationary and the direction is safe.");
+                context.getTelemetry().addLine(
+                        "Press A when the robot is stationary and the direction is safe.");
                 context.getTelemetry().update();
                 if (opMode.gamepad1.aWasPressed()) { beginTrial(); }
                 return false;
@@ -388,17 +388,17 @@ public class LimitsPhase extends TuningPhase {
 
     @Override
     protected void reportResults() {
-        context.getTelemetry().addData("Forward Velocity", context.constants.forwardVelLimitIn);
+        context.getTelemetry().addData("Forward Velocity", number(context.constants.forwardVelLimitIn));
         context.getTelemetry()
-                .addData("Forward Acceleration", context.constants.forwardAccelLimitIn);
-        context.getTelemetry().addData("Strafe Velocity", context.constants.strafeVelLimitIn);
-        context.getTelemetry().addData("Strafe Acceleration", context.constants.strafeAccelLimitIn);
-        context.getTelemetry().addData("Angular Velocity", context.constants.angularVelLimitRad);
+                .addData("Forward Acceleration", number(context.constants.forwardAccelLimitIn));
+        context.getTelemetry().addData("Strafe Velocity", number(context.constants.strafeVelLimitIn));
+        context.getTelemetry().addData("Strafe Acceleration", number(context.constants.strafeAccelLimitIn));
+        context.getTelemetry().addData("Angular Velocity", number(context.constants.angularVelLimitRad));
         context.getTelemetry()
-                .addData("Angular Acceleration", context.constants.angularAccelLimitRad);
-        context.getTelemetry().addData("Translation kV", context.constants.translationalKV);
-        context.getTelemetry().addData("Translation kA", context.constants.translationalKA);
-        context.getTelemetry().addData("Angular kV", context.constants.angularKV);
-        context.getTelemetry().addData("Angular kA", context.constants.angularKA);
+                .addData("Angular Acceleration", number(context.constants.angularAccelLimitRad));
+        context.getTelemetry().addData("Translation kV", number(context.constants.translationalKV));
+        context.getTelemetry().addData("Translation kA", number(context.constants.translationalKA));
+        context.getTelemetry().addData("Angular kV", number(context.constants.angularKV));
+        context.getTelemetry().addData("Angular kA", number(context.constants.angularKA));
     }
 }

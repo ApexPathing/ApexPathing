@@ -1,6 +1,7 @@
 package tuning;
 
 import geometry.Angle;
+import geometry.AngleUnit;
 import paths.builders.TurnBuilder;
 import paths.movements.Turn;
 
@@ -18,8 +19,10 @@ public class HeadingPhase extends TuningPhase {
 
     private Coefficient selected = Coefficient.P;
     private double activeTestTarget = 0.0;
-    private double nextTestTarget = 90.0;
+    private double nextTestTarget = 60.0;
     private boolean testTurnQueued = false;
+    private Angle manualHeadingOrigin = Angle.fromRad(0.0);
+    private final ManualResponseMetrics manualMetrics = new ManualResponseMetrics();
 
     public HeadingPhase(TunerContext context) {
         super(context);
@@ -39,7 +42,7 @@ public class HeadingPhase extends TuningPhase {
     @Override
     protected void showPreRunInstructions() {
         context.getTelemetry().addLine(
-                "Place the robot where it can rotate safely about 80 degrees in either direction.");
+                "Place the robot where it can rotate safely through a 60 degree out-and-back test.");
     }
 
     @Override
@@ -56,6 +59,10 @@ public class HeadingPhase extends TuningPhase {
             context.getFollower().enableHeadingController();
             context.getFollower().disableDriveController();
             context.getFollower().setHeadingCoefficients(context.constants.angularCoeffs);
+            manualHeadingOrigin = context.getFollower().getPose().getHeading();
+            activeTestTarget = 0.0;
+            nextTestTarget = 60.0;
+            testTurnQueued = false;
             return;
         }
 
@@ -75,6 +82,14 @@ public class HeadingPhase extends TuningPhase {
 
     @Override
     protected boolean manualTuned() {
+        if (manualMetrics.isActive()) {
+            double position = manualHeadingOrigin.getShortestAngleTo(
+                    context.getFollower().getPose().getHeading()).getRad();
+            double velocity = context.getFollower().getVelocity().getHeading(AngleUnit.RAD);
+            manualMetrics.sample(position, velocity, ManualResponseMetrics.maxMotorPower(
+                    context.getFollower().getDrivetrain()));
+            if (!context.getFollower().isBusy()) { manualMetrics.finish(); }
+        }
         if (opMode.gamepad1.leftBumperWasPressed()) {
             selected = selected == Coefficient.P ? Coefficient.S :
                     Coefficient.values()[selected.ordinal() - 1];
@@ -108,28 +123,37 @@ public class HeadingPhase extends TuningPhase {
         if (testTurnQueued && !context.getFollower().isBusy()) {
             activeTestTarget = nextTestTarget;
             Turn testTurn = new TurnBuilder(context.getFollower().getPose())
-                    .turnTo(Angle.fromDeg(activeTestTarget))
+                    .turnTo(Angle.fromRad(manualHeadingOrigin.getRad() +
+                            Math.toRadians(activeTestTarget)))
                     .quickBuild();
+            double start = manualHeadingOrigin.getShortestAngleTo(
+                    context.getFollower().getPose().getHeading()).getRad();
+            manualMetrics.begin("manual_heading_response", start,
+                    Math.toRadians(activeTestTarget), Math.toRadians(2.5), 0.10);
             context.getFollower().follow(testTurn);
-            nextTestTarget = -nextTestTarget;
+            nextTestTarget = nextManualTestTarget(activeTestTarget);
             testTurnQueued = false;
         }
 
         if (opMode.gamepad1.aWasPressed()) {
+            manualMetrics.finish();
             return true;
         }
 
-        context.getTelemetry().addData("Selected", selected.toString());
-        reportResults();
-        context.getTelemetry().addData("Increment", increment);
-        context.getTelemetry().addData("Active Test Target", activeTestTarget + " deg");
-        context.getTelemetry().addData("Next Test Target", nextTestTarget + " deg");
-        context.getTelemetry().addData("Test Turn Queued", testTurnQueued);
+        addTunableValue("Heading P", context.constants.angularCoeffs.kP,
+                selected == Coefficient.P);
+        addTunableValue("Heading D", context.constants.angularCoeffs.kD,
+                selected == Coefficient.D);
+        addTunableValue("Heading S", context.constants.angularCoeffs.kS,
+                selected == Coefficient.S);
+        context.getTelemetry().addData("Increment", number(increment));
+        context.getTelemetry().addData("Active Test Target", number(activeTestTarget) + " deg");
+        context.getTelemetry().addData("Final error", number(manualMetrics.getFinalError()) + " rad");
+        if (context.isDebugMode()) { reportDetailedManualMetrics("rad", "rad/s"); }
         context.getTelemetry().addLine("Dpad Up/Down: Change value");
-        context.getTelemetry().addLine("Dpad Left/Right: Change increment");
         context.getTelemetry().addLine("LB/RB: select Value to tune");
-        context.getTelemetry().addLine(control("X") + ": Run test turn");
-        context.getTelemetry().addLine(control("A") + ": Save");
+        context.getTelemetry().addLine("X: Run test turn");
+        context.getTelemetry().addLine("A: Save");
         context.getTelemetry().update();
 
         return false;
@@ -137,13 +161,33 @@ public class HeadingPhase extends TuningPhase {
 
     @Override
     protected void reportResults() {
-        context.getTelemetry().addData("Heading P", context.constants.angularCoeffs.kP);
-        context.getTelemetry().addData("Heading D", context.constants.angularCoeffs.kD);
-        context.getTelemetry().addData("Heading S", context.constants.angularCoeffs.kS);
+        context.getTelemetry().addData("Heading P", number(context.constants.angularCoeffs.kP));
+        context.getTelemetry().addData("Heading D", number(context.constants.angularCoeffs.kD));
+        context.getTelemetry().addData("Heading S", number(context.constants.angularCoeffs.kS));
         if (!manualMode && context.isDebugMode()) {
             context.getTelemetry().addData("Operator check",
                     routine.getOperatorCheckSummary());
             context.getTelemetry().addData("PDS response CSV", routine.getCsvPath());
         }
+    }
+
+    private void reportDetailedManualMetrics(String positionUnit, String velocityUnit) {
+        context.getTelemetry().addData("Overshoot",
+                manualMetrics.getOvershoot() + " " + positionUnit);
+        context.getTelemetry().addData("Settling time",
+                manualMetrics.getSettlingTime() + " s");
+        context.getTelemetry().addData("RMS error",
+                manualMetrics.getRmsError() + " " + positionUnit);
+        context.getTelemetry().addData("Time-weighted squared error",
+                manualMetrics.getTimeWeightedSquaredError());
+        context.getTelemetry().addData("Peak velocity",
+                manualMetrics.getPeakVelocity() + " " + velocityUnit);
+        context.getTelemetry().addData("Saturation", Math.round(
+                manualMetrics.getSaturationFraction() * 1000.0) / 10.0 + "%");
+        context.getTelemetry().addData("Response CSV", manualMetrics.getCsvPath());
+    }
+
+    static double nextManualTestTarget(double completedTargetDegrees) {
+        return Math.abs(completedTargetDegrees) < 1e-9 ? 60.0 : 0.0;
     }
 }

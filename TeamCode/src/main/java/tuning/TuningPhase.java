@@ -37,7 +37,6 @@ public abstract class TuningPhase {
 
         while (opMode.opModeIsActive()) {
             context.updateDebugMode(false);
-            if (context.checkEmergencyStop()) { return false; }
             context.getTelemetry().clearAll();
             context.addInterfaceHeader();
 
@@ -89,15 +88,14 @@ public abstract class TuningPhase {
     private void showModeSelector() {
         context.getTelemetry().addLine(getPhaseName() + " phase initialized");
         if (manualTuneIsPossible() && autoTuneIsPossible()) {
-            context.getTelemetry().addLine("Press " + control("B") +
-                    " to toggle automatic and manual tuning.");
+            context.getTelemetry().addLine("Press B to toggle automatic and manual tuning.");
             context.getTelemetry().addData("Selected Mode:", manualMode ? "Manual" : "Automatic");
         } else {
             manualMode = manualTuneIsPossible();
             context.getTelemetry().addData("Tuner Type:", manualMode ? "Manual" : "Automatic");
         }
         showPreRunInstructions();
-        context.getTelemetry().addLine("Press " + control("A") + " to run this phase.");
+        context.getTelemetry().addLine("Press A to run this phase.");
         context.getTelemetry().update();
     }
 
@@ -107,12 +105,17 @@ public abstract class TuningPhase {
     private void showResults() {
         context.getTelemetry().addLine(getPhaseName() + " phase complete with results:");
         reportResults();
-        context.getTelemetry().addLine("Press " + control("B") + " to continue.");
+        context.getTelemetry().addLine("Press B to continue.");
         context.getTelemetry().update();
     }
 
-    /** Shows the stock FTCodeSim key without changing the real gamepad control. */
-    protected String control(String button) { return context.control(button); }
+    /** Displays a compact editable value list without spending a separate line on selection. */
+    protected void addTunableValue(String label, double value, boolean selected) {
+        context.getTelemetry().addLine((selected ? "-> " : "   ") + label + ": " +
+                context.formatNumber(value));
+    }
+
+    protected String number(double value) { return context.formatNumber(value); }
 
     /**
      * Places a simulated movement test at its phase-specific staging pose. On hardware, resetting

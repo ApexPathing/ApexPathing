@@ -34,7 +34,7 @@ public final class ApexAdvantageScopeLayout {
         ObjectNode threeDimensionalTab = findTab(tabs, 3, THREE_D_TITLE);
         if (threeDimensionalTab == null) { return false; }
 
-        boolean changed = addPathSource(threeDimensionalTab, mapper);
+        boolean changed = putPathBehindRobot(threeDimensionalTab, mapper);
         String game = threeDimensionalTab.path("controller").path("game").asText(
                 "FTC:2025-2026 Field");
 
@@ -45,7 +45,18 @@ public final class ApexAdvantageScopeLayout {
             changed = true;
         }
         changed |= addRobotSource(twoDimensionalTab, mapper);
-        changed |= addPathSource(twoDimensionalTab, mapper);
+        changed |= putPathBehindRobot(twoDimensionalTab, mapper);
+
+        // Older layouts may already contain Apex's Pose2d[] as a "ghost" source. AdvantageScope
+        // renders that as a robot model at every sampled pose, which hides the live robot. Convert
+        // any such source in every field tab into a thin trajectory instead of leaving it behind.
+        for (JsonNode tab : tabs) {
+            if (tab instanceof ObjectNode && (tab.path("type").asInt(-1) == 2 ||
+                    tab.path("type").asInt(-1) == 3) &&
+                    sourceIndexByLogKey(sources((ObjectNode) tab, mapper), PATH_LOG_KEY) >= 0) {
+                changed |= putPathBehindRobot((ObjectNode) tab, mapper);
+            }
+        }
         return changed;
     }
 
@@ -87,15 +98,55 @@ public final class ApexAdvantageScopeLayout {
         return true;
     }
 
-    private static boolean addPathSource(ObjectNode tab, ObjectMapper mapper) {
+    /** AdvantageScope draws earlier sources over later ones, so keep the path last and narrow. */
+    private static boolean putPathBehindRobot(ObjectNode tab, ObjectMapper mapper) {
         ArrayNode sources = sources(tab, mapper);
-        if (containsSource(sources, "trajectory", PATH_LOG_KEY)) { return false; }
+        int existingIndex = sourceIndexByLogKey(sources, PATH_LOG_KEY);
+        ObjectNode pathSource;
+        boolean changed = false;
+        if (existingIndex >= 0) {
+            pathSource = (ObjectNode) sources.remove(existingIndex);
+            changed = existingIndex != sources.size();
+        } else {
+            ObjectNode options = mapper.createObjectNode();
+            options.put("color", "#00ff00");
+            options.put("size", "normal");
+            pathSource = source(mapper, "trajectory", PATH_LOG_KEY, "Pose2d[]", options);
+            changed = true;
+        }
+        if (!"trajectory".equals(pathSource.path("type").asText())) {
+            pathSource.put("type", "trajectory");
+            changed = true;
+        }
+        if (!"Pose2d[]".equals(pathSource.path("logType").asText())) {
+            pathSource.put("logType", "Pose2d[]");
+            changed = true;
+        }
+        ObjectNode options = pathSource.with("options");
+        if (!"normal".equals(options.path("size").asText())) {
+            options.put("size", "normal");
+            changed = true;
+        }
+        sources.add(pathSource);
+        return changed;
+    }
 
-        ObjectNode options = mapper.createObjectNode();
-        options.put("color", "#00ff00");
-        options.put("size", "bold");
-        sources.add(source(mapper, "trajectory", PATH_LOG_KEY, "Pose2d[]", options));
-        return true;
+    private static int sourceIndexByLogKey(ArrayNode sources, String logKey) {
+        for (int i = 0; i < sources.size(); i++) {
+            if (logKey.equals(sources.get(i).path("logKey").asText())) { return i; }
+        }
+        return -1;
+    }
+
+    private static int sourceIndex(ArrayNode sources, String type, String logKey) {
+        for (int i = 0; i < sources.size(); i++) {
+            JsonNode source = sources.get(i);
+            if (type.equals(source.path("type").asText()) &&
+                    logKey.equals(source.path("logKey").asText())) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static ArrayNode sources(ObjectNode tab, ObjectMapper mapper) {
@@ -117,13 +168,7 @@ public final class ApexAdvantageScopeLayout {
     }
 
     private static boolean containsSource(ArrayNode sources, String type, String logKey) {
-        for (JsonNode source : sources) {
-            if (type.equals(source.path("type").asText()) &&
-                    logKey.equals(source.path("logKey").asText())) {
-                return true;
-            }
-        }
-        return false;
+        return sourceIndex(sources, type, logKey) >= 0;
     }
 
     private static ObjectNode source(ObjectMapper mapper, String type, String logKey,

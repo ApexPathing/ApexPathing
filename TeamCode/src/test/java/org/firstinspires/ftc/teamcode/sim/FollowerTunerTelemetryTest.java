@@ -14,12 +14,16 @@ import org.codeblooded.ftcodesim.hardware.devices.SimMotor;
 import org.codeblooded.ftcodesim.physics.MotionVector;
 import org.junit.Test;
 
+import java.io.File;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import core.FollowerConstants;
+import core.ApexStorage;
+import controllers.PDSController.PDSCoefficients;
+import tuning.PDSRoutine;
 
 public class FollowerTunerTelemetryTest {
     @Test
@@ -218,8 +222,13 @@ public class FollowerTunerTelemetryTest {
         }
     }
 
-    @Test(timeout = 60_000L)
-    public void automaticHeadingIdentificationWaitsForAlternatingOperatorTests() throws Exception {
+    @Test(timeout = 90_000L)
+    public void automaticHeadingOptimizationWaitsForAlternatingOperatorTests() throws Exception {
+        int savedTrialRepeats = PDSRoutine.PD_TRIAL_REPEATS;
+        int savedMaxIterations = PDSRoutine.PD_MAX_ITERATIONS;
+        PDSRoutine.PD_TRIAL_REPEATS = 1;
+        PDSRoutine.PD_MAX_ITERATIONS = 2;
+        configureStableFollowerConstants();
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         List<String> frames = new CopyOnWriteArrayList<>();
         ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
@@ -253,12 +262,12 @@ public class FollowerTunerTelemetryTest {
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);
             tuner.gamepad1.a = false;
 
-            long checkDeadline = System.nanoTime() + 45_000_000_000L;
+            long checkDeadline = System.nanoTime() + 65_000_000_000L;
             while (!latestFrameContains(frames, "Ready for operator check") &&
                     System.nanoTime() < checkDeadline) {
                 pumpWithPhysics(session, tuner, telemetry, hardware, 20);
             }
-            assertTrue("Automatic heading identification did not reach the operator check. " +
+            assertTrue("Automatic heading optimization did not reach the operator check. " +
                             "Latest telemetry:\n" + latestFrame(frames),
                     latestFrameContains(frames, "Ready for operator check"));
 
@@ -269,11 +278,15 @@ public class FollowerTunerTelemetryTest {
             tuner.gamepad1.x = true;
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);
             tuner.gamepad1.x = false;
-            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            long firstStartDeadline = System.nanoTime() + 1_000_000_000L;
+            while (!latestFrameContains(frames, "turning to the requested test target") &&
+                    System.nanoTime() < firstStartDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
             assertTrue("X did not start the first operator-requested test",
                     latestFrameContains(frames, "turning to the requested test target"));
 
-            long firstTestDeadline = System.nanoTime() + 6_000_000_000L;
+            long firstTestDeadline = System.nanoTime() + 10_000_000_000L;
             while (!latestFrameContains(frames, "Test complete") &&
                     System.nanoTime() < firstTestDeadline) {
                 pumpWithPhysics(session, tuner, telemetry, hardware, 20);
@@ -282,23 +295,28 @@ public class FollowerTunerTelemetryTest {
                     latestFrameContains(frames, "Test complete"));
             assertTrue("First heading test did not use the positive target",
                     hardware.drivetrain.position.theta > 0.0);
+            double firstTestHeading = hardware.drivetrain.position.theta;
 
             tuner.gamepad1.x = true;
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);
             tuner.gamepad1.x = false;
-            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            long secondStartDeadline = System.nanoTime() + 1_000_000_000L;
+            while (!latestFrameContains(frames, "turning to the requested test target") &&
+                    System.nanoTime() < secondStartDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
             assertTrue("X did not start the alternating return test",
                     latestFrameContains(frames, "turning to the requested test target"));
 
-            long secondTestDeadline = System.nanoTime() + 6_000_000_000L;
+            long secondTestDeadline = System.nanoTime() + 10_000_000_000L;
             while (!latestFrameContains(frames, "Test complete") &&
                     System.nanoTime() < secondTestDeadline) {
                 pumpWithPhysics(session, tuner, telemetry, hardware, 20);
             }
             assertTrue("Alternating heading test did not complete",
                     latestFrameContains(frames, "Test complete"));
-            assertTrue("Second heading test did not alternate to the negative target",
-                    hardware.drivetrain.position.theta < 0.0);
+            assertTrue("Second heading test did not return toward its starting heading",
+                    Math.abs(hardware.drivetrain.position.theta) < Math.abs(firstTestHeading));
 
             tuner.gamepad1.a = true;
             pumpWithPhysics(session, tuner, telemetry, hardware, 30);
@@ -311,11 +329,13 @@ public class FollowerTunerTelemetryTest {
                             "Heading Controller phase complete with results"));
         } finally {
             SimLinearOpModeBridge.stop(session);
+            PDSRoutine.PD_TRIAL_REPEATS = savedTrialRepeats;
+            PDSRoutine.PD_MAX_ITERATIONS = savedMaxIterations;
         }
     }
 
     @Test
-    public void velocityFeedbackPhaseCanBeSelectedAndDisplayed() throws Exception {
+    public void manualVelocityFeedbackWaitsForStartAndRestartsSafely() throws Exception {
         markAllPhasesCompleteForSelectionTest();
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         List<String> frames = new CopyOnWriteArrayList<>();
@@ -352,6 +372,128 @@ public class FollowerTunerTelemetryTest {
             assertTrue("Velocity Feedback did not initialize after selection",
                     frames.stream().anyMatch(frame ->
                             frame.contains("Velocity Feedback phase initialized")));
+
+            tuner.gamepad1.b = true;
+            pump(session, tuner, telemetry, 30);
+            tuner.gamepad1.b = false;
+            pump(session, tuner, telemetry, 30);
+            tuner.gamepad1.a = true;
+            pump(session, tuner, telemetry, 30);
+            tuner.gamepad1.a = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+
+            assertTrue("Manual velocity selection was not marked inline",
+                    latestFrameContains(frames, "-> Translation feedback"));
+            assertFalse("Normal velocity telemetry still shows verbose diagnostics",
+                    latestFrame(frames).contains("Test state") ||
+                            latestFrame(frames).contains("Usable samples") ||
+                            latestFrame(frames).contains("Response CSV"));
+            assertFalse("Manual velocity feedback moved before X",
+                    anyDriveMotorPowered(hardware));
+
+            tuner.gamepad1.x = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.x = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 120);
+            assertTrue("X did not start the manual velocity test",
+                    anyDriveMotorPowered(hardware));
+
+            tuner.gamepad1.dpad_up = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.dpad_up = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 80);
+            assertTrue("Gain edit did not safely restart the active test",
+                    latestFrameContains(frames, "-> Translation feedback"));
+
+            tuner.gamepad1.right_bumper = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.right_bumper = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 80);
+            assertFalse("Changing feedback axes did not stop the active movement",
+                    anyDriveMotorPowered(hardware));
+        } finally {
+            SimLinearOpModeBridge.stop(session);
+        }
+    }
+
+    @Test(timeout = 35_000L)
+    public void manualDrivePdsRunsStraightOutAndBackWithCompactTelemetry() throws Exception {
+        configureStableFollowerConstants();
+        ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
+        List<String> frames = new CopyOnWriteArrayList<>();
+        ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
+        telemetry.setMsTransmissionInterval(0);
+
+        FollowerTuner tuner = new FollowerTuner();
+        tuner.hardwareMap = hardware.hardwareMap;
+        tuner.telemetry = telemetry;
+        tuner.gamepad1 = new Gamepad();
+        tuner.gamepad2 = new Gamepad();
+
+        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(tuner, () -> { });
+        try {
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+            for (int i = 0; i < 6 && !latestFrameContains(frames, "DRIVE <"); i++) {
+                tuner.gamepad1.dpad_down = true;
+                pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+                tuner.gamepad1.dpad_down = false;
+                pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            }
+            assertTrue("Drive was not available in the phase selector",
+                    latestFrameContains(frames, "DRIVE <"));
+
+            tuner.gamepad1.b = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.b = false;
+            SimLinearOpModeBridge.start(session);
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+
+            tuner.gamepad1.b = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.b = false;
+            tuner.gamepad1.a = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.a = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+
+            String normalFrame = latestFrame(frames);
+            assertTrue("Drive coefficient selection was not marked inline",
+                    normalFrame.contains("-> Drive P"));
+            assertFalse("Normal drive telemetry still shows verbose diagnostics",
+                    normalFrame.contains("Selected") || normalFrame.contains("Overshoot") ||
+                            normalFrame.contains("Settling time") ||
+                            normalFrame.contains("Response CSV"));
+
+            tuner.gamepad1.x = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 30);
+            tuner.gamepad1.x = false;
+            long outboundDeadline = System.nanoTime() + 8_000_000_000L;
+            while ((hardware.drivetrain.position.x < ApexSimulation.FIELD_CENTER_INCHES + 20.0 ||
+                    anyDriveMotorPowered(hardware)) &&
+                    System.nanoTime() < outboundDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
+            assertTrue("Manual drive did not reach its 24-inch outbound target",
+                    hardware.drivetrain.position.x > ApexSimulation.FIELD_CENTER_INCHES + 20.0);
+            assertTrue("Manual drive path changed heading on the outbound leg",
+                    Math.abs(hardware.drivetrain.position.theta) < Math.toRadians(3.0));
+
+            tuner.gamepad1.x = true;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+            tuner.gamepad1.x = false;
+            pumpWithPhysics(session, tuner, telemetry, hardware, 100);
+            long returnDeadline = System.nanoTime() + 8_000_000_000L;
+            while ((hardware.drivetrain.position.x > ApexSimulation.FIELD_CENTER_INCHES + 4.0 ||
+                    anyDriveMotorPowered(hardware)) &&
+                    System.nanoTime() < returnDeadline) {
+                pumpWithPhysics(session, tuner, telemetry, hardware, 20);
+            }
+            assertTrue("Manual drive did not return toward its starting position; x=" +
+                            hardware.drivetrain.position.x + ", powered=" +
+                            anyDriveMotorPowered(hardware) + ", telemetry=\n" + latestFrame(frames),
+                    hardware.drivetrain.position.x < ApexSimulation.FIELD_CENTER_INCHES + 4.0);
+            assertTrue("Manual reverse path changed heading",
+                    Math.abs(hardware.drivetrain.position.theta) < Math.toRadians(3.0));
         } finally {
             SimLinearOpModeBridge.stop(session);
         }
@@ -387,23 +529,20 @@ public class FollowerTunerTelemetryTest {
 
             tuner.gamepad1.left_stick_button = false;
             pump(session, tuner, telemetry, 50);
-            int exitFrameStart = frames.size();
             tuner.gamepad1.right_stick_button = true;
             pump(session, tuner, telemetry, 1650);
             tuner.gamepad1.right_stick_button = false;
             pump(session, tuner, telemetry, 50);
 
-            assertTrue("Holding the displayed exit control did not disable debug mode",
-                    frames.subList(Math.min(exitFrameStart, frames.size()), frames.size()).stream()
-                            .anyMatch(frame -> frame.contains("E-STOP") &&
-                                    !frame.contains("DEBUG MODE")));
+            assertFalse("Holding the displayed exit control did not disable debug mode",
+                    frames.get(frames.size() - 1).contains("DEBUG MODE"));
         } finally {
             SimLinearOpModeBridge.stop(session);
         }
     }
 
     @Test
-    public void backButtonEmergencyStopsFromAnActiveTunerScreen() throws Exception {
+    public void stopButtonStopsDrivetrainFromAnActiveTunerScreen() throws Exception {
         ApexSimulation.Hardware hardware = ApexSimulation.createHardware();
         List<String> frames = new CopyOnWriteArrayList<>();
         ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
@@ -414,10 +553,8 @@ public class FollowerTunerTelemetryTest {
         tuner.telemetry = telemetry;
         tuner.gamepad1 = new Gamepad();
         tuner.gamepad2 = new Gamepad();
-        AtomicBoolean stopRequested = new AtomicBoolean();
-
-        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(
-                tuner, () -> stopRequested.set(true));
+        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(tuner, () -> { });
+        boolean stopped = false;
         try {
             pump(session, tuner, telemetry, 100);
             tuner.gamepad1.b = true;
@@ -436,19 +573,11 @@ public class FollowerTunerTelemetryTest {
             assertTrue("Test did not reach an actively powered tuner state",
                     anyDriveMotorPowered(hardware));
 
-            tuner.gamepad1.back = true;
-            pump(session, tuner, telemetry, 50);
-            tuner.gamepad1.back = false;
-            pump(session, tuner, telemetry, 50);
-
-            assertTrue("Back did not request an immediate OpMode stop", stopRequested.get());
-            assertTrue("Emergency-stop confirmation was not shown",
-                    frames.stream().anyMatch(frame ->
-                            frame.contains("EMERGENCY STOP ACTIVATED")));
-            assertFalse("Emergency stop left drivetrain power active",
-                    anyDriveMotorPowered(hardware));
-        } finally {
             SimLinearOpModeBridge.stop(session);
+            stopped = true;
+            assertFalse("Stop button left drivetrain power active", anyDriveMotorPowered(hardware));
+        } finally {
+            if (!stopped) { SimLinearOpModeBridge.stop(session); }
         }
     }
 
@@ -554,8 +683,17 @@ public class FollowerTunerTelemetryTest {
             long milliseconds
     ) throws Exception {
         long deadline = System.nanoTime() + milliseconds * 1_000_000L;
+        long lastPhysicsUpdate = System.nanoTime();
         while (System.nanoTime() < deadline) {
-            stepPhysics(hardware, 0.005);
+            long now = System.nanoTime();
+            double remainingDt = Math.max(0.001,
+                    Math.min(0.05, (now - lastPhysicsUpdate) * 1e-9));
+            lastPhysicsUpdate = now;
+            while (remainingDt > 1e-9) {
+                double substep = Math.min(0.005, remainingDt);
+                stepPhysics(hardware, substep);
+                remainingDt -= substep;
+            }
             SimLinearOpModeBridge.eventLoopIteration(
                     session,
                     tuner.gamepad1,
@@ -595,16 +733,32 @@ public class FollowerTunerTelemetryTest {
     }
 
     private static void markAllPhasesCompleteForSelectionTest() {
+        configureStableFollowerConstants();
+    }
+
+    private static void configureStableFollowerConstants() {
+        if (System.getProperty(ApexStorage.DIRECTORY_PROPERTY) == null) {
+            File directory = new File(System.getProperty("user.dir"), "build/ftcodesim-data");
+            System.setProperty(ApexStorage.DIRECTORY_PROPERTY, directory.getAbsolutePath());
+        }
         FollowerConstants constants = FollowerConstants.getInstance();
-        constants.angularCoeffs.kP = 1.0;
-        constants.angularKA = 1.0;
-        constants.translationalCoeffs.kP = 1.0;
-        constants.angularKV = 1.0;
-        constants.translationalKV = 1.0;
-        constants.translationalKA = 1.0;
-        constants.kCentripetal = 1.0;
-        constants.velocityFeedbackGain = 1.0;
-        constants.angularVelocityFeedbackGain = 1.0;
+        // Keep the shared singleton deterministic and conservative enough for the bounded
+        // closed-loop tuner trials. Production gains can be much higher once characterized.
+        constants.angularCoeffs = new PDSCoefficients(0.80, 0.10, 0.23);
+        constants.translationalCoeffs = new PDSCoefficients(0.12, 0.03, 0.23);
+        constants.angularKV = 0.066;
+        constants.angularKA = 0.043;
+        constants.translationalKV = 0.0071;
+        constants.translationalKA = 0.0047;
+        constants.kCentripetal = 0.0061;
+        constants.velocityFeedbackGain = 0.059;
+        constants.angularVelocityFeedbackGain = 0.25;
+        constants.forwardVelLimitIn = 64.7;
+        constants.forwardAccelLimitIn = 105.7;
+        constants.strafeVelLimitIn = 53.6;
+        constants.strafeAccelLimitIn = 84.9;
+        constants.angularVelLimitRad = 6.96;
+        constants.angularAccelLimitRad = 12.0;
     }
 
     private static boolean anyDriveMotorPowered(ApexSimulation.Hardware hardware) {

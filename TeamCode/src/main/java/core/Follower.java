@@ -53,6 +53,10 @@ public class Follower {
     private static final double ENDPOINT_BREAKAWAY_RESERVE = 0.02;
     private static final double ENDPOINT_STALLED_VELOCITY_IN_PER_SECOND = 0.25;
     private static final double PROFILED_HEADING_CAPTURE_RADIANS = Math.toRadians(10.0);
+    private static final double SETTLED_LINEAR_VELOCITY_SQ = 64.0;
+    private static final double SETTLED_ANGULAR_VELOCITY = 0.12;
+    private static final double MIN_COMPLETION_DISTANCE_INCHES = 1.0;
+    private static final double MIN_COMPLETION_HEADING_RADIANS = Math.toRadians(2.0);
     private final FollowerConstants constants;
     private final BaseDrivetrain<?> drivetrain;
     private final BaseLocalizer<?> localizer;
@@ -286,7 +290,9 @@ public class Follower {
             // Require both positional accuracy and low angular velocity to prevent momentum
             // overshoot
             double currentAngularVel = localizer.getVel().getHeading().getRad();
-            if (Math.abs(headingError) < headingTol && Math.abs(currentAngularVel) < 0.05) {
+            if (Math.abs(headingError) < Math.max(
+                    headingTol, MIN_COMPLETION_HEADING_RADIANS) &&
+                    Math.abs(currentAngularVel) < SETTLED_ANGULAR_VELOCITY) {
                 this.stop();
                 return;
             }
@@ -467,7 +473,13 @@ public class Follower {
                                 driveController.calculateEndDistance(distanceRemaining));
                     }
                 } else {
-                    double decelPower = driveController.calculateEndDistance(distanceRemaining);
+                    // Closest-point progress can remain just below 1.0 after the chassis passes
+                    // a straight endpoint. Near the end, use signed endpoint error so a quick
+                    // path brakes and reverses instead of continuing forever.
+                    double endDistanceError = distanceRemaining <
+                            PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES
+                            ? signedEndpointError : distanceRemaining;
+                    double decelPower = driveController.calculateEndDistance(endDistanceError);
                     double percentage = 1.0 - s / path.getParametricPath().getLengthIn();
                     double percentageClipped = Math.min(Math.max(percentage, 0.0), 1.0);
                     double maxVel = path.getQuickVelocityLimit(percentageClipped,
@@ -522,10 +534,11 @@ public class Follower {
             // endpoint projection can reach t=1 before the chassis reaches the point itself.
             double endpointDistance = currentPos.distanceTo(path.getEndPose().getVec()).getIn();
             double currentAngularVelocity = localizer.getVel().getHeading().getRad();
-            if (endpointDistance < distanceTol &&
-                    Math.abs(endpointHeadingError) < headingTol &&
-                    robotVel.getMagSq().getIn() < 25 &&
-                    Math.abs(currentAngularVelocity) < 0.05) {
+            if (endpointDistance < Math.max(distanceTol, MIN_COMPLETION_DISTANCE_INCHES) &&
+                    Math.abs(endpointHeadingError) < Math.max(
+                            headingTol, MIN_COMPLETION_HEADING_RADIANS) &&
+                    robotVel.getMagSq().getIn() < SETTLED_LINEAR_VELOCITY_SQ &&
+                    Math.abs(currentAngularVelocity) < SETTLED_ANGULAR_VELOCITY) {
                 stop();
                 return;
             }

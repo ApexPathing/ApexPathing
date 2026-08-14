@@ -56,4 +56,17 @@ public class FeedforwardTunerTest {
         assertTrue(!fit.isValid());
     }
 
+    @Test
+    public void manualAngularPowerAlternatesDirectionAndClampsSaturation() {
+        double counterclockwise = FeedforwardTuner.manualAngularPower(
+                0.2, 0.1, 0.15, 3.0, 2.0, 1.0);
+        double clockwise = FeedforwardTuner.manualAngularPower(
+                0.2, 0.1, 0.15, 3.0, 2.0, -1.0);
+
+        assertEquals(-counterclockwise, clockwise, 1e-12);
+        assertEquals(0.95, counterclockwise, 1e-12);
+        assertEquals(1.0, FeedforwardTuner.clipManualPower(1.4), 0.0);
+        assertEquals(-1.0, FeedforwardTuner.clipManualPower(-1.4), 0.0);
+    }
+
 }

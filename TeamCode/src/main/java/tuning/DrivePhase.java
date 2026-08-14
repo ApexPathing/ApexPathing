@@ -23,6 +23,10 @@ public class DrivePhase extends TuningPhase {
 
     private Coefficient selected = Coefficient.P;
     private double target = 24.0;
+    private double activeTestTarget;
+    private boolean testPathQueued;
+    private boolean testButtonHeld;
+    private final ManualResponseMetrics manualMetrics = new ManualResponseMetrics();
 
     public DrivePhase(TunerContext context) {
         super(context);
@@ -34,7 +38,7 @@ public class DrivePhase extends TuningPhase {
         testPath = () -> factory.path(
                 context.getFollower().getPose(),
                 context.getFollower().getPose().plus(factory.pose(target, 0.0, 0.0))
-        ).interpolateWith(InterpolationStyle.TANGENT_FORWARD).quickBuild();
+        ).interpolateWith(InterpolationStyle.CONSTANT_START_HEADING).quickBuild();
     }
 
     @Override
@@ -49,16 +53,18 @@ public class DrivePhase extends TuningPhase {
     @Override
     protected void showPreRunInstructions() {
         context.getTelemetry().addLine(
-                "Place the robot with at least 24 inches clear in front and behind it.");
+                "Place the robot with at least 36 inches clear in front and behind it.");
         context.getTelemetry().addLine(
-                "Automatic identification oscillates around its start. Response checks move only " +
-                        "when requested afterward.");
+                "Automatic tuning runs repeated bounded moves around its start. Response checks " +
+                        "move only when requested afterward.");
     }
 
     @Override
     protected void init() {
-        // Both automatic relay motion and the manual test path travel in both directions.
+        // Both automatic closed-loop trials and the manual test path travel in both directions.
         positionRobotForSimulation(geometry.Pose.zero());
+        testPathQueued = false;
+        testButtonHeld = opMode.gamepad1.x;
         // We only want to use the existing drive coefficients if we are in manual mode
         if (manualMode) {
             context.getFollower().enableControllers();
@@ -82,6 +88,13 @@ public class DrivePhase extends TuningPhase {
 
     @Override
     protected boolean manualTuned() {
+        if (manualMetrics.isActive()) {
+            manualMetrics.sample(context.getFollower().getPose().getX().getIn(),
+                    context.getFollower().getVelocity().getX().getIn(),
+                    ManualResponseMetrics.maxMotorPower(
+                            context.getFollower().getDrivetrain()));
+            if (!context.getFollower().isBusy()) { manualMetrics.finish(); }
+        }
         if (opMode.gamepad1.leftBumperWasPressed()) {
             selected = selected == Coefficient.P ? Coefficient.S :
                     Coefficient.values()[selected.ordinal() - 1];
@@ -109,24 +122,36 @@ public class DrivePhase extends TuningPhase {
             context.getFollower().setDriveCoefficients(context.constants.translationalCoeffs);
         }
 
-        if (opMode.gamepad1.xWasPressed() && !context.getFollower().isBusy()) {
+        if (opMode.gamepad1.x && !testButtonHeld) { testPathQueued = true; }
+        testButtonHeld = opMode.gamepad1.x;
+        if (testPathQueued && !context.getFollower().isBusy()) {
+            activeTestTarget = target;
+            double start = context.getFollower().getPose().getX().getIn();
+            manualMetrics.begin("manual_drive_response", start, start + target, 0.75, 1.0);
             context.getFollower().follow(testPath.get());
             target = -target;
+            testPathQueued = false;
         }
 
         if (opMode.gamepad1.aWasPressed()) {
+            manualMetrics.finish();
             return true;
         }
 
-        context.getTelemetry().addData("Selected", selected.toString());
-        context.getTelemetry().addData("Target", target);
-        reportResults();
-        context.getTelemetry().addData("Increment", increment);
+        addTunableValue("Drive P", context.constants.translationalCoeffs.kP,
+                selected == Coefficient.P);
+        addTunableValue("Drive D", context.constants.translationalCoeffs.kD,
+                selected == Coefficient.D);
+        addTunableValue("Drive S", context.constants.translationalCoeffs.kS,
+                selected == Coefficient.S);
+        context.getTelemetry().addData("Increment", number(increment));
+        context.getTelemetry().addData("Active Test Target", number(activeTestTarget) + " in");
+        context.getTelemetry().addData("Final error", number(manualMetrics.getFinalError()) + " in");
+        if (context.isDebugMode()) { reportDetailedManualMetrics(); }
         context.getTelemetry().addLine("Dpad Up/Down: Change value");
-        context.getTelemetry().addLine("Dpad Left/Right: Change increment");
         context.getTelemetry().addLine("LB/RB: Select value to tune");
-        context.getTelemetry().addLine(control("X") + ": Run test path");
-        context.getTelemetry().addLine(control("A") + ": Save");
+        context.getTelemetry().addLine("X: Run test path");
+        context.getTelemetry().addLine("A: Save");
         context.getTelemetry().update();
 
         return false;
@@ -134,13 +159,27 @@ public class DrivePhase extends TuningPhase {
 
     @Override
     protected void reportResults() {
-        context.getTelemetry().addData("Drive P", context.constants.translationalCoeffs.kP);
-        context.getTelemetry().addData("Drive D", context.constants.translationalCoeffs.kD);
-        context.getTelemetry().addData("Drive S", context.constants.translationalCoeffs.kS);
+        context.getTelemetry().addData("Drive P", number(context.constants.translationalCoeffs.kP));
+        context.getTelemetry().addData("Drive D", number(context.constants.translationalCoeffs.kD));
+        context.getTelemetry().addData("Drive S", number(context.constants.translationalCoeffs.kS));
         if (!manualMode && context.isDebugMode()) {
             context.getTelemetry().addData("Operator check",
                     routine.getOperatorCheckSummary());
             context.getTelemetry().addData("PDS response CSV", routine.getCsvPath());
         }
+    }
+
+    private void reportDetailedManualMetrics() {
+        context.getTelemetry().addData("Overshoot", manualMetrics.getOvershoot() + " in");
+        context.getTelemetry().addData("Settling time",
+                manualMetrics.getSettlingTime() + " s");
+        context.getTelemetry().addData("RMS error", manualMetrics.getRmsError() + " in");
+        context.getTelemetry().addData("Time-weighted squared error",
+                manualMetrics.getTimeWeightedSquaredError());
+        context.getTelemetry().addData("Peak velocity",
+                manualMetrics.getPeakVelocity() + " in/s");
+        context.getTelemetry().addData("Saturation", Math.round(
+                manualMetrics.getSaturationFraction() * 1000.0) / 10.0 + "%");
+        context.getTelemetry().addData("Response CSV", manualMetrics.getCsvPath());
     }
 }

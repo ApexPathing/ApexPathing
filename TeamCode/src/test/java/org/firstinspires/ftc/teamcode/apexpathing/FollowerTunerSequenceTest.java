@@ -34,7 +34,7 @@ public class FollowerTunerSequenceTest {
     }
 
     @Test
-    public void phaseSelectionRequiresEveryPriorPhaseButAllowsRetuning() {
+    public void everyPhaseCanBeSelectedRegardlessOfPriorCompletion() {
         FollowerTuner.Phase[] phases = FollowerTuner.Phase.values();
         boolean[] original = new boolean[phases.length];
         for (int i = 0; i < phases.length; i++) {
@@ -44,12 +44,14 @@ public class FollowerTunerSequenceTest {
 
         try {
             assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.HEADING));
-            assertFalse(FollowerTuner.phaseAvailable(FollowerTuner.Phase.LIMITS));
+            assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.LIMITS));
+            assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.DRIVE));
+            assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.VELOCITY_FEEDBACK));
 
             FollowerTuner.Phase.HEADING.tuned = true;
             assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.HEADING));
             assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.LIMITS));
-            assertFalse(FollowerTuner.phaseAvailable(FollowerTuner.Phase.DRIVE));
+            assertTrue(FollowerTuner.phaseAvailable(FollowerTuner.Phase.DRIVE));
         } finally {
             for (int i = 0; i < phases.length; i++) { phases[i].tuned = original[i]; }
         }
