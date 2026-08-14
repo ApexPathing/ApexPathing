@@ -19,13 +19,16 @@ import tuning.VelocityFeedbackPhase;
 
 /**
  * This OpMode is used to tune the Apex Pathing Follower. It allows the user to select a tuning
- * phase and run it, saving the constants when complete.
+ * phase at which to begin, then runs each remaining phase in order and saves after every phase.
  *
  * @author Sohum Arora - 22985 Paraducks
  * @author Dylan B. - 18597 RoboClovers - Delta
  */
 @TeleOp(name = "Follower Tuner", group = "Apex Pathing")
 public class FollowerTuner extends LinearOpMode {
+    /** Allows the desktop simulator to exercise phases without saved prerequisite constants. */
+    public static final String UNLOCK_PHASES_PROPERTY = "apex.simulation.unlockTunerPhases";
+
     /**
      * Completion is determined by whether the last saved value of the phase's constants is non-zero
      * Tuners are ran in the order of the enum ordinals
@@ -43,7 +46,8 @@ public class FollowerTuner extends LinearOpMode {
         CENTRIPETAL(CentripetalPhase.class, (FollowerConstants constants) ->
                 constants.kCentripetal != 0.0),
         VELOCITY_FEEDBACK(VelocityFeedbackPhase.class, (FollowerConstants constants) ->
-                constants.angularVelocityFeedbackGain != 0.0);
+                velocityFeedbackTuned(constants.velocityFeedbackGain,
+                        constants.angularVelocityFeedbackGain));
 
         final Class<? extends TuningPhase> phaseClass;
         final Predicate<FollowerConstants> isTunedPredicate;
@@ -70,6 +74,7 @@ public class FollowerTuner extends LinearOpMode {
 
     @Override
     public void runOpMode() {
+        resetPhaseSelection();
         context = new TunerContext(this);
         context.setFollower(new Follower(new Constants(), hardwareMap, true));
         context.constants.drivetrainType = context.getFollower().getDrivetrain().getDrivetrainType();
@@ -77,38 +82,76 @@ public class FollowerTuner extends LinearOpMode {
         for (Phase phase : phases) { phase.updateTunedStatus(context.constants); }
         selectFirstIncompletePhase();
 
-        while (opModeInInit() && !isPhaseSelected) { isPhaseSelected = phaseSelector(); }
+        while (opModeInInit() && !isPhaseSelected) {
+            context.updateDebugMode(true);
+            isPhaseSelected = phaseSelector();
+            sleep(20);
+        }
 
-        telemetry.addLine("Press Start to run the tuner.");
-        telemetry.addLine("Make sure the robot has enough space.");
-        telemetry.update();
+        while (opModeInInit() && isPhaseSelected) {
+            context.updateDebugMode(false);
+            telemetry.clearAll();
+            context.addInterfaceHeader();
+            telemetry.addLine("Press Start to run the tuner.");
+            telemetry.addLine("Make sure the robot has enough space.");
+            telemetry.update();
+            sleep(20);
+        }
 
-        waitForStart();
+        // Starting the OpMode must never silently accept a highlighted option. If Start was
+        // pressed before a phase was selected, keep presenting the same menu while RUNNING until
+        // the user explicitly confirms a phase.
+        while (opModeIsActive() && !isPhaseSelected) {
+            context.updateDebugMode(true);
+            isPhaseSelected = phaseSelector();
+            sleep(20);
+        }
+        if (!opModeIsActive()) {
+            context.getFollower().stop();
+            resetPhaseSelection();
+            return;
+        }
+
         context.getFollower().setPose(Pose.zero());
 
         while (opModeIsActive()) {
             if (phase.run(this)) { // Returns true if the phase is complete
                 context.saveConstants();
-                requestOpModeStop();
+                selectedPhaseOrdinal.updateTunedStatus(context.constants);
+
+                Phase nextPhase = nextPhase(selectedPhaseOrdinal);
+                if (nextPhase == null) {
+                    finishTuningWorkflow();
+                    break;
+                }
+
+                context.getFollower().stop();
+                context.getFollower().enableControllers();
+                context.getFollower().setPose(Pose.zero());
+                selectedPhaseOrdinal = nextPhase;
+                selectPhase();
             }
         }
 
         context.getFollower().stop();
+        resetPhaseSelection();
     }
 
-    /** Loops through phases before the given phase to check if they have been tuned or not. */
-    private boolean phaseAvailable(Phase phase) {
-        for (int i = 0; i < phase.ordinal(); i++) {
-            if (!phases[i].tuned) {
-                return false;
-            }
-        }
+    /** A reused simulator OpMode instance must always reopen at the phase picker. */
+    private void resetPhaseSelection() {
+        selectedPhaseOrdinal = null;
+        phase = null;
+        isPhaseSelected = false;
+    }
+
+    /** Every phase remains selectable; completion state is informational, not a menu lock. */
+    static boolean phaseAvailable(Phase phase) {
         return true;
     }
 
     private String phaseStatus(Phase phase) {
-        if (phase.tuned) { return "[ ✓ ]"; }
-        return phaseAvailable(phase) ? "[   ]" : "[ X ]";
+        if (phase.tuned) { return "[DONE]"; }
+        return phaseAvailable(phase) ? "[READY]" : "[LOCKED]";
     }
 
     private void selectFirstIncompletePhase() {
@@ -122,7 +165,11 @@ public class FollowerTuner extends LinearOpMode {
     }
 
     private boolean phaseSelector() {
+        telemetry.clearAll();
+        context.addInterfaceHeader();
+        telemetry.addLine("Select a tuning phase");
         telemetry.addLine("Use Dpad Up and Down to choose a phase, then press B to select it.");
+        telemetry.addLine("Completed phases can be selected again for retuning.");
         telemetry.addLine();
 
         for (int i = 0; i < phaseAmount; i++) {
@@ -134,24 +181,73 @@ public class FollowerTuner extends LinearOpMode {
         telemetry.update();
 
         if (gamepad1.dpadUpWasPressed()) {
-            do {
-                selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() - 1 + phaseAmount) % phaseAmount];
-            } while (!phaseAvailable(selectedPhaseOrdinal));
+            selectedPhaseOrdinal = phases[
+                    (selectedPhaseOrdinal.ordinal() - 1 + phaseAmount) % phaseAmount];
         } else if (gamepad1.dpadDownWasPressed()) {
-            do {
-                selectedPhaseOrdinal = phases[(selectedPhaseOrdinal.ordinal() + 1) % phaseAmount];
-            } while (!phaseAvailable(selectedPhaseOrdinal));
-        } else if (gamepad1.bWasPressed()) {
-            try {
-                phase = selectedPhaseOrdinal.phaseClass.getDeclaredConstructor(TunerContext.class)
-                        .newInstance(context);
-            } catch (Exception e) {
-                // This won't happen because the setup is correct, but Java requires the catch.
-                throw new RuntimeException(e);
-            }
+            selectedPhaseOrdinal = phases[
+                    (selectedPhaseOrdinal.ordinal() + 1) % phaseAmount];
+        } else if (gamepad1.bWasPressed() && phaseAvailable(selectedPhaseOrdinal)) {
+            selectPhase();
             return true;
         }
 
         return false;
+    }
+
+    private void selectPhase() {
+        try {
+            phase = selectedPhaseOrdinal.phaseClass.getDeclaredConstructor(TunerContext.class)
+                    .newInstance(context);
+            isPhaseSelected = true;
+            // Do not let a rate-limited RESULTS frame from the previous phase obscure the next
+            // phase's selector in FTCodeSim's Driver Station.
+            telemetry.clearAll();
+            context.addInterfaceHeader();
+            telemetry.addLine("Next phase: " + phaseDisplayName(selectedPhaseOrdinal));
+            telemetry.addLine("Choose automatic/manual mode, then press A.");
+            telemetry.update();
+        } catch (Exception e) {
+            // This won't happen because the setup is correct, but Java requires the catch.
+            throw new RuntimeException(e);
+        }
+    }
+
+    static Phase nextPhase(Phase current) {
+        int nextOrdinal = current.ordinal() + 1;
+        return nextOrdinal < phaseAmount ? phases[nextOrdinal] : null;
+    }
+
+    static Class<? extends TuningPhase> nextPhaseClass(Phase current) {
+        Phase next = nextPhase(current);
+        return next == null ? null : next.phaseClass;
+    }
+
+    static boolean velocityFeedbackTuned(double translationGain, double angularGain) {
+        return translationGain != 0.0 && angularGain != 0.0;
+    }
+
+    private static String phaseDisplayName(Phase phase) {
+        return phase.name().replace('_', ' ');
+    }
+
+    private void finishTuningWorkflow() {
+        telemetry.clearAll();
+        context.addInterfaceHeader();
+        telemetry.addLine("All follower tuning phases are complete.");
+
+        // FTCodeSim does not move its Driver Station out of RUNNING when a LinearOpMode calls
+        // requestOpModeStop(). Keep the final lifecycle alive until the red Stop button is used.
+        if (Boolean.getBoolean(UNLOCK_PHASES_PROPERTY)) {
+            telemetry.addLine("Press the red STOP button to finish this simulation.");
+            telemetry.update();
+            while (opModeIsActive()) {
+                context.updateDebugMode(false);
+                sleep(50);
+            }
+            return;
+        }
+
+        telemetry.update();
+        requestOpModeStop();
     }
 }

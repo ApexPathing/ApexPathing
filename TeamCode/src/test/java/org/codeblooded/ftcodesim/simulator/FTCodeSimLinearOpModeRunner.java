@@ -8,6 +8,8 @@ import org.psilynx.psikit.core.Logger;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import core.Follower;
+
 /** Runs FTCodeSim with the FTC SDK's real LinearOpMode lifecycle. */
 public final class FTCodeSimLinearOpModeRunner {
     private FTCodeSimLinearOpModeRunner() { }
@@ -48,18 +50,21 @@ public final class FTCodeSimLinearOpModeRunner {
         Logger.setSimulation(true);
         long start = System.nanoTime();
         Logger.setTimeSource(() -> (System.nanoTime() - start) * 1e-9);
+        ApexAdvantageScopeLogger apexLogger = new ApexAdvantageScopeLogger();
+        Follower.setDiagnostics(apexLogger);
 
         AtomicBoolean userRequestedStop = new AtomicBoolean(false);
-        SimLinearOpModeBridge.Session session = SimLinearOpModeBridge.initialize(
-                opMode,
-                () -> userRequestedStop.set(true)
-        );
+        SimLinearOpModeBridge.Session session = null;
 
         try {
+            session = SimLinearOpModeBridge.initialize(
+                    opMode,
+                    () -> userRequestedStop.set(true)
+            );
             while (!lifecycle.isStarted
                     && !lifecycle.isStopped
                     && !userRequestedStop.get()) {
-                runEventLoopIteration(lifecycle, session);
+                runEventLoopIteration(lifecycle, session, apexLogger);
             }
 
             if (lifecycle.isStarted
@@ -69,27 +74,30 @@ public final class FTCodeSimLinearOpModeRunner {
             }
 
             while (!lifecycle.isStopped && !userRequestedStop.get()) {
-                runEventLoopIteration(lifecycle, session);
+                runEventLoopIteration(lifecycle, session, apexLogger);
             }
         } finally {
-            SimLinearOpModeBridge.stop(session);
+            if (session != null) {
+                SimLinearOpModeBridge.stop(session);
+            }
+            Follower.setDiagnostics(null);
             Logger.end();
         }
     }
 
     private static void runEventLoopIteration(
             OpModeLifecycle lifecycle,
-            SimLinearOpModeBridge.Session session
+            SimLinearOpModeBridge.Session session,
+            ApexAdvantageScopeLogger apexLogger
     ) throws InterruptedException {
         Gamepad gamepad1 = new Gamepad();
         Gamepad gamepad2 = new Gamepad();
         gamepad1.fromByteArray(lifecycle.latestGamepad1Data);
         gamepad2.fromByteArray(lifecycle.latestGamepad2Data);
 
-        lifecycle.wrap(() -> SimLinearOpModeBridge.eventLoopIteration(
-                session,
-                gamepad1,
-                gamepad2
-        ));
+        lifecycle.wrap(() -> {
+            SimLinearOpModeBridge.eventLoopIteration(session, gamepad1, gamepad2);
+            apexLogger.flush();
+        });
     }
 }

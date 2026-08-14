@@ -37,6 +37,26 @@ import paths.movements.Turn;
  * @author Xander Haemel - 31616 404 Not Found
  */
 public class Follower {
+    private static final FollowerDiagnostics NO_DIAGNOSTICS = new FollowerDiagnostics() {
+        @Override
+        public void recordPose(Pose pose) { }
+
+        @Override
+        public void recordCurrentPath(Path path) { }
+
+        @Override
+        public void clearCurrentPath() { }
+    };
+    private static volatile FollowerDiagnostics diagnostics = NO_DIAGNOSTICS;
+
+    private static final double PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES = 4.0;
+    private static final double ENDPOINT_BREAKAWAY_RESERVE = 0.02;
+    private static final double ENDPOINT_STALLED_VELOCITY_IN_PER_SECOND = 0.25;
+    private static final double PROFILED_HEADING_CAPTURE_RADIANS = Math.toRadians(10.0);
+    private static final double SETTLED_LINEAR_VELOCITY_SQ = 64.0;
+    private static final double SETTLED_ANGULAR_VELOCITY = 0.12;
+    private static final double MIN_COMPLETION_DISTANCE_INCHES = 1.0;
+    private static final double MIN_COMPLETION_HEADING_RADIANS = Math.toRadians(2.0);
     private final FollowerConstants constants;
     private final BaseDrivetrain<?> drivetrain;
     private final BaseLocalizer<?> localizer;
@@ -46,8 +66,6 @@ public class Follower {
     private final double headingTol; // Radians
     private final double distanceTol; // Inches
 
-    private double lastS = -1.0;
-    private long lastNano = -1;
     private Angle lastHeading; // Tracks heading between ticks for angular callback sweeps
     private Pose lastPose;
 
@@ -62,6 +80,9 @@ public class Follower {
     private double velocityFeedbackGain;
     private double angularVelocityFeedbackGain;
 
+    /** When true, combined cross-track and centripetal power is reserved before heading power. */
+    private boolean prioritizeCentripetal = false;
+
     private FollowerMovement currentMovement ;
     private boolean paused = false;
 
@@ -74,7 +95,13 @@ public class Follower {
     private double turnDirection;
     private double turnTotalDisplacement;
     private double crossTrackError;
+    private double centripetalError;
     private double t;
+    private Vector closestPathPoint = Vector.zero();
+    private Vector crossTrackNormal = Vector.zero();
+    private Vector pathNormal = Vector.zero();
+    private Vector crossTrackCorrection = Vector.zero();
+    private Vector centripetalCorrection = Vector.zero();
 
     /** Constructs the drivetrain, localizer, and follower from the given {@link ApexConstants}. */
     public Follower(ApexConstants constants, HardwareMap hardwareMap) {
@@ -219,6 +246,7 @@ public class Follower {
      */
     public void update(boolean holdPose) {
         localizer.update();
+        diagnostics.recordPose(localizer.getPose());
 
         // Exit early if nothing is running or if paused.
         if (currentMovement == null || paused) {
@@ -254,12 +282,6 @@ public class Follower {
         Vector currentPos = current.getVec();
         Angle currentHeading = current.getHeading();
 
-        long currentNano = System.nanoTime();
-
-        // Calculate delta time for velocity feedback
-        double deltaT_seconds = (lastNano != -1) ? (currentNano - lastNano) / 1e9 : 0.0;
-        lastNano = currentNano;
-
         // region Turn Execution
         if (currentMovement instanceof Turn) {
             Turn turn = (Turn) currentMovement;
@@ -271,7 +293,9 @@ public class Follower {
             // Require both positional accuracy and low angular velocity to prevent momentum
             // overshoot
             double currentAngularVel = localizer.getVel().getHeading().getRad();
-            if (Math.abs(headingError) < headingTol && Math.abs(currentAngularVel) < 0.05) {
+            if (Math.abs(headingError) < Math.max(
+                    headingTol, MIN_COMPLETION_HEADING_RADIANS) &&
+                    Math.abs(currentAngularVel) < SETTLED_ANGULAR_VELOCITY) {
                 this.stop();
                 return;
             }
@@ -293,12 +317,22 @@ public class Follower {
                         currentAngularVel
                 );
             }
+            // Quick and profiled turns can both settle just outside tolerance after their
+            // command falls below drivetrain breakaway power.
+            totalTurnPower = ensureAngularEndpointBreakawayPower(
+                    totalTurnPower,
+                    headingError,
+                    currentAngularVel,
+                    constants.angularCoeffs.kS,
+                    headingTol
+            );
 
             Vector error = targetTurnPoseVec.minus(currentPos);
             double errorMag = error.getMag().getIn();
 
-            // Hold xy position actively while turning
-            if (drivetrain.isHolonomic() && errorMag > distanceTol) {
+            // Hold xy only when translational control is explicitly enabled. Tuning phases can
+            // disable it to guarantee that a Turn produces no x/y drivetrain command.
+            if (driveControllerEnabled && drivetrain.isHolonomic() && errorMag > distanceTol) {
                 Vector fieldFeedback = driveController.calculatePointToPoint(
                         targetTurnPoseVec, currentPos);
                 AllocatedCommand positionHold = allocateHolonomicStage(
@@ -322,22 +356,29 @@ public class Follower {
             t = segment.getBestT(currentPos);
 
             Vector targetPoseVec = segment.getPosition(t);
+            closestPathPoint = targetPoseVec;
             double s = segment.getDistanceToEndIn(targetPoseVec, t);
             Vector velVec = segment.getFirstDerivative(t);
             Vector accelVec = segment.getSecondDerivative(t);
-            Vector normal = PathSegment.calculateArcNormal(velVec, accelVec);
             Vector unitTangent = velVec.normalize();
+            Vector lateralNormal = PathSegment.calculateLeftNormal(velVec);
+            Vector normal = PathSegment.calculateArcNormal(velVec, accelVec);
+            crossTrackNormal = lateralNormal;
+            pathNormal = normal;
+            Path path = (Path) currentMovement;
             Vector endTangent = segment.getFirstDerivative(1.0).normalize();
+            double signedEndpointError = pathEndpointTangentError(
+                    path.getEndPose().getVec(), currentPos, endTangent);
 
             // Process scheduled distance and angular callbacks
-            processCallbacks(s / segment.getLengthIn(), currentHeading);
+            double pathProgress = 1.0 - s / segment.getLengthIn();
+            processCallbacks(Range.clip(pathProgress, 0.0, 1.0), currentHeading);
 
             Vector robotVel = localizer.getVel().getVec();
             double distanceRemaining = segment.getDistanceToEndIn(targetPoseVec, t);
             double kappa = segment.getSignedCurvature(t);
             double dKappa = segment.getCurvatureDerivative(t);
 
-            Path path = (Path) currentMovement;
             boolean isProfiled = path.isProfiled();
             double distanceTraveled = path.getParametricPath().getLengthIn() - s;
             MotionParameters targets = isProfiled ?
@@ -345,9 +386,8 @@ public class Follower {
 
             HolonomicDriveModel driveModel = getActiveHolonomicDriveModel();
 
-            double robotTangentialVel = (deltaT_seconds > 1e-6 && lastS >= 0.0) ?
-                    (lastS - s) / deltaT_seconds : 0.0;
-            lastS = s;
+            // Localizers report field-axis velocity. Project it directly onto the path tangent;
+            double robotTangentialVel = robotVel.dot(unitTangent).getIn();
 
             // Calculate heading power allocation
             Angle headingTarg = path.getInterpolator().getHeadingTarg(s, velVec, endTangent);
@@ -371,26 +411,49 @@ public class Follower {
                     ? headingController.calculate(
                     headingTarg.getRad() - currentHeading.getRad()) : 0.0;
             double turnPow = Range.clip(headingFeedback + headingFF, -1.0, 1.0);
+            double endpointHeadingError = currentHeading.getShortestAngleTo(
+                    path.getEndPose().getHeading()).getRad();
+            if (distanceRemaining < PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES) {
+                turnPow = ensureAngularEndpointBreakawayPower(
+                        turnPow,
+                        endpointHeadingError,
+                        localizer.getVel().getHeading().getRad(),
+                        constants.angularCoeffs.kS,
+                        headingTol
+                );
+            }
 
             // Calculate lateral cross track power allocation
             Vector positionalError = targetPoseVec.minus(currentPos);
-            crossTrackError = positionalError.dot(normal).getIn();
+            crossTrackError = positionalError.dot(lateralNormal).getIn();
+            centripetalError = positionalError.dot(normal).getIn();
             double lateralFeedbackMag = driveControllerEnabled
                     ? driveController.calculateCrossTrack(crossTrackError) : 0.0;
+            crossTrackCorrection = lateralNormal.times(lateralFeedbackMag);
 
-            double requiredLateralAccel = robotTangentialVel * robotTangentialVel * kappa;
-            double centripetalMag = requiredLateralAccel * centripetalGain;
+            centripetalCorrection = calculateCentripetalCorrection(
+                    normal, robotTangentialVel, kappa, centripetalGain);
 
-            Vector requestedLateralField = normal.times(
-                    centripetalMag + lateralFeedbackMag
-            );
+            Vector requestedLateralField = crossTrackCorrection.plus(centripetalCorrection);
+            AllocatedCommand lateralCommand;
+            if (prioritizeCentripetal) {
+                lateralCommand = allocateHolonomicStage(
+                        requestedLateralField, currentHeading, 1.0, driveModel);
+                turnPow = Range.clip(
+                        turnPow,
+                        -(1.0 - lateralCommand.getPowerDemand()),
+                        1.0 - lateralCommand.getPowerDemand()
+                );
+            } else {
+                lateralCommand = allocateHolonomicStage(
+                        requestedLateralField,
+                        currentHeading,
+                        1.0 - Math.abs(turnPow),
+                        driveModel
+                );
+            }
+
             double availableMotorPower = 1.0 - Math.abs(turnPow);
-            AllocatedCommand lateralCommand = allocateHolonomicStage(
-                    requestedLateralField,
-                    currentHeading,
-                    availableMotorPower,
-                    driveModel
-            );
 
             // Charge the corrected lateral demand before allocating tangent power. Mecanum uses
             // wheel-space L1 demand; isotropic drives combine orthogonal translation by magnitude.
@@ -407,10 +470,11 @@ public class Follower {
             double totalTangentPower;
             if (t < 1.0) {
                 if (isProfiled) {
+                    double motionSign = feedforwardMotionSign(
+                            targets.getTangentialVel(), targets.getTangentialAccel());
                     double feedforward = translationalKV * targets.getTangentialVel() +
                             translationalKA * targets.getTangentialAccel() +
-                            Math.signum(targets.getTangentialVel()) *
-                                    constants.translationalCoeffs.kS;
+                            motionSign * constants.translationalCoeffs.kS;
 
                     // TODO: Verify p only feedback performance, compare to SquID
                     totalTangentPower = (targets.getTangentialVel() - robotTangentialVel) *
@@ -422,7 +486,13 @@ public class Follower {
                                 driveController.calculateEndDistance(distanceRemaining));
                     }
                 } else {
-                    double decelPower = driveController.calculateEndDistance(distanceRemaining);
+                    // Closest-point progress can remain just below 1.0 after the chassis passes
+                    // a straight endpoint. Near the end, use signed endpoint error so a quick
+                    // path brakes and reverses instead of continuing forever.
+                    double endDistanceError = distanceRemaining <
+                            PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES
+                            ? signedEndpointError : distanceRemaining;
+                    double decelPower = driveController.calculateEndDistance(endDistanceError);
                     double percentage = 1.0 - s / path.getParametricPath().getLengthIn();
                     double percentageClipped = Math.min(Math.max(percentage, 0.0), 1.0);
                     double maxVel = path.getQuickVelocityLimit(percentageClipped,
@@ -435,9 +505,23 @@ public class Follower {
                 }
             } else {
                 // Apply reverse feedback if robot drifts past the final point
-                double distancePastEnd = currentPos.minus(targetPoseVec).dot(endTangent).getIn();
-                totalTangentPower = driveController.calculateEndDistance(-distancePastEnd);
+                totalTangentPower = isProfiled ? 0.0 :
+                        driveController.calculateEndDistance(signedEndpointError);
             }
+
+            if (isProfiled) {
+                double endpointPower = driveController.calculateEndDistance(signedEndpointError);
+                totalTangentPower = blendProfiledEndpointPower(
+                        totalTangentPower, endpointPower, distanceRemaining);
+            }
+            totalTangentPower = ensureEndpointBreakawayPower(
+                    totalTangentPower,
+                    signedEndpointError,
+                    robotTangentialVel,
+                    constants.translationalCoeffs.kS,
+                    distanceTol,
+                    distanceRemaining
+            );
 
             Vector requestedTangentField = unitTangent.times(totalTangentPower);
             AllocatedCommand tangentCommand = allocateHolonomicStage(
@@ -449,8 +533,13 @@ public class Follower {
             Vector finalDriveOutput = lateralCommand.getRobotCommand()
                     .plus(tangentCommand.getRobotCommand());
 
-            // Must be moving slower than 5 in/s and be within distance tolerance to stop
-            if (distanceRemaining < distanceTol && robotVel.getMagSq().getIn() < 25) {
+            double endpointDistance = currentPos.distanceTo(path.getEndPose().getVec()).getIn();
+            double currentAngularVelocity = localizer.getVel().getHeading().getRad();
+            if (endpointDistance < Math.max(distanceTol, MIN_COMPLETION_DISTANCE_INCHES) &&
+                    Math.abs(endpointHeadingError) < Math.max(
+                            headingTol, MIN_COMPLETION_HEADING_RADIANS) &&
+                    robotVel.getMagSq().getIn() < SETTLED_LINEAR_VELOCITY_SQ &&
+                    Math.abs(currentAngularVelocity) < SETTLED_ANGULAR_VELOCITY) {
                 stop();
                 return;
             }
@@ -466,7 +555,8 @@ public class Follower {
             double s = segment.getDistanceToEndIn(targetPoseVec, t);
 
             // Process scheduled distance and angular callbacks
-            processCallbacks(s / segment.getLengthIn(), currentHeading);
+            double pathProgress = 1.0 - s / segment.getLengthIn();
+            processCallbacks(Range.clip(pathProgress, 0.0, 1.0), currentHeading);
 
             Vector velVec = segment.getFirstDerivative(t);
             Vector robotVel = localizer.getVel().getVec();
@@ -544,6 +634,7 @@ public class Follower {
         this.lastPose = movement.getEndPose();
 
         if (movement instanceof Turn) {
+            diagnostics.clearCurrentPath();
             Turn turn = (Turn) currentMovement;
             this.targetTurnPoseVec = turn.getStartPose().getVec();
             double signedTurn = turn.getStartPose().getHeading().getShortestAngleTo(
@@ -554,6 +645,7 @@ public class Follower {
         } else if (movement instanceof Path) {
             Path pathSegmentMove = (Path) currentMovement;
             this.segment = pathSegmentMove.getParametricPath();
+            diagnostics.recordCurrentPath(pathSegmentMove);
             if (drivetrain instanceof DualActuated) {
                 if (pathSegmentMove.getPathType() == Path.PathType.HOLONOMIC) {
                     ((DualActuated) drivetrain).activateHolonomicState();
@@ -566,8 +658,6 @@ public class Follower {
         headingController.reset();
         turnController.reset();
         driveController.reset();
-        lastS = -1.0;
-        lastNano = -1;
         paused = false;
 
         // Reset tracker for angular callbacks so it doesn't instantly trigger on path start
@@ -587,7 +677,17 @@ public class Follower {
         this.turnDirection = 0.0;
         this.turnTotalDisplacement = 0.0;
 
+        diagnostics.clearCurrentPath();
+
         this.drivetrain.stop();
+    }
+
+    /**
+     * Installs an optional diagnostics observer. Intended for simulator and logging integrations.
+     * Passing {@code null} restores the dependency-free no-op production default.
+     */
+    public static void setDiagnostics(FollowerDiagnostics observer) {
+        diagnostics = observer == null ? NO_DIAGNOSTICS : observer;
     }
 
     /** Halts the current movement temporarily without clearing the target state */
@@ -600,8 +700,54 @@ public class Follower {
     public void resume() {
         if (this.paused) {
             this.paused = false;
-            this.lastNano = -1;
         }
+    }
+
+    static double pathEndpointTangentError(Vector endpoint, Vector current, Vector endTangent) {
+        return endpoint.minus(current).dot(endTangent).getIn();
+    }
+
+    static double blendProfiledEndpointPower(double profilePower, double endpointPower,
+                                               double pathDistanceRemaining) {
+        double blend = Range.clip(
+                (PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES - pathDistanceRemaining) /
+                        PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES,
+                0.0,
+                1.0
+        );
+        return profilePower * (1.0 - blend) + endpointPower * blend;
+    }
+
+    static double ensureEndpointBreakawayPower(double requestedPower, double endpointError,
+                                                double tangentialVelocity, double staticGain,
+                                                double positionTolerance,
+                                                double pathDistanceRemaining) {
+        boolean inEndpointCapture = pathDistanceRemaining <
+                PROFILED_ENDPOINT_CAPTURE_DISTANCE_INCHES;
+        boolean outsideTolerance = Math.abs(endpointError) > positionTolerance;
+        boolean stalled = Math.abs(tangentialVelocity) <
+                ENDPOINT_STALLED_VELOCITY_IN_PER_SECOND;
+        if (!inEndpointCapture || !outsideTolerance || !stalled) { return requestedPower; }
+
+        double minimumPower = Math.min(1.0,
+                Math.abs(staticGain) + ENDPOINT_BREAKAWAY_RESERVE);
+        if (Math.abs(requestedPower) >= minimumPower) { return requestedPower; }
+        return Math.copySign(minimumPower, endpointError);
+    }
+
+    static double ensureAngularEndpointBreakawayPower(double requestedPower, double headingError,
+                                                       double angularVelocity, double staticGain,
+                                                       double headingTolerance) {
+        boolean inEndpointCapture = Math.abs(headingError) <
+                PROFILED_HEADING_CAPTURE_RADIANS;
+        boolean outsideTolerance = Math.abs(headingError) > headingTolerance;
+        boolean stalled = Math.abs(angularVelocity) < 0.05;
+        if (!inEndpointCapture || !outsideTolerance || !stalled) { return requestedPower; }
+
+        double minimumPower = Math.min(1.0,
+                Math.abs(staticGain) + ENDPOINT_BREAKAWAY_RESERVE);
+        if (Math.abs(requestedPower) >= minimumPower) { return requestedPower; }
+        return Math.copySign(minimumPower, headingError);
     }
 
     /**
@@ -662,6 +808,9 @@ public class Follower {
      */
     public Pose getVelocity() { return localizer.getVel(); }
 
+    /** Returns the unfiltered localizer velocity for diagnostics and response logging. */
+    public Pose getRawVelocity() { return localizer.getRawVel(); }
+
     /**
      * Retrieves the robots current acceleration estimate from the localizer.
      *
@@ -673,11 +822,35 @@ public class Follower {
 
     public double getCrossTrackErrorIn() { return crossTrackError; }
 
+    /** Signed path error toward the local center of curvature; positive means outside the turn. */
+    public double getCentripetalErrorIn() { return centripetalError; }
+
+    /** The most recent closest point used by the holonomic follower. Intended for diagnostics. */
+    public Vector getClosestPathPoint() { return closestPathPoint; }
+
+    /** Continuous left-hand path normal used to define signed cross-track feedback. */
+    public Vector getCrossTrackNormal() { return crossTrackNormal; }
+
+    /** The principal path normal, which always points toward the local center of curvature. */
+    public Vector getPathNormal() { return pathNormal; }
+
+    /** Field-space feedback vector that corrects cross-track error. */
+    public Vector getCrossTrackCorrection() { return crossTrackCorrection; }
+
+    /** Field-space feedforward vector that supplies centripetal acceleration. */
+    public Vector getCentripetalCorrection() { return centripetalCorrection; }
+
     public void disableHeadingController() { this.headingControllerEnabled = false; }
 
     public void disableDriveController() { this.driveControllerEnabled = false; }
 
     public void disableControllers() { disableHeadingController(); disableDriveController(); }
+
+    public void enableHeadingController() { this.headingControllerEnabled = true; }
+
+    public void enableDriveController() { this.driveControllerEnabled = true; }
+
+    public void enableControllers() { enableHeadingController(); enableDriveController(); }
 
     public void setHeadingCoefficients(PDSCoefficients coefficients) {
         headingController.setCoefficients(coefficients);
@@ -689,6 +862,34 @@ public class Follower {
     }
 
     public void setCentripetal(double centripetalGain) { this.centripetalGain = centripetalGain; }
+
+    /** Selects whether combined lateral correction or heading receives power first at saturation. */
+    public void setPrioritizeCentripetal(boolean prioritizeCentripetal) {
+        this.prioritizeCentripetal = prioritizeCentripetal;
+    }
+
+    public boolean isPrioritizeCentripetal() { return prioritizeCentripetal; }
+
+    /**
+     * Builds centripetal power from a principal normal. Because the normal already contains the
+     * bend direction, curvature contributes magnitude only; applying its sign again reverses the
+     * force on clockwise/right-hand curves.
+     */
+    static Vector calculateCentripetalCorrection(Vector principalNormal,
+                                                  double tangentialVelocity,
+                                                  double signedCurvature,
+                                                  double gain) {
+        double magnitude = tangentialVelocity * tangentialVelocity *
+                Math.abs(signedCurvature) * gain;
+        return principalNormal.times(magnitude);
+    }
+
+    /** Uses acceleration to select static-friction direction while a profile starts from rest. */
+    static double feedforwardMotionSign(double targetVelocity, double targetAcceleration) {
+        if (Math.abs(targetVelocity) > 1e-6) { return Math.signum(targetVelocity); }
+        if (Math.abs(targetAcceleration) > 1e-6) { return Math.signum(targetAcceleration); }
+        return 0.0;
+    }
 
     public void setVelocityFeedback(double velocityFeedbackGain,
                                     double angularVelocityFeedbackGain) {

@@ -12,6 +12,7 @@ final class ApexSimTelemetry extends SimTelemetry {
     private final StringBuilder currentFrame = new StringBuilder();
 
     private String queuedFrame;
+    private Thread frameOwner;
     private int transmissionIntervalMs = 100;
     private long lastTransmissionNanos;
     private boolean hasTransmitted;
@@ -33,6 +34,7 @@ final class ApexSimTelemetry extends SimTelemetry {
 
     @Override
     public synchronized Item addData(String caption, Object value) {
+        claimFrame();
         currentFrame.append(caption).append(' ').append(String.valueOf(value)).append('\n');
         return null;
     }
@@ -50,12 +52,14 @@ final class ApexSimTelemetry extends SimTelemetry {
 
     @Override
     public synchronized Line addLine() {
+        claimFrame();
         currentFrame.append('\n');
         return null;
     }
 
     @Override
     public synchronized Line addLine(String lineCaption) {
+        claimFrame();
         currentFrame.append(lineCaption).append('\n');
         return null;
     }
@@ -63,6 +67,7 @@ final class ApexSimTelemetry extends SimTelemetry {
     @Override
     public synchronized void clear() {
         currentFrame.setLength(0);
+        frameOwner = null;
     }
 
     @Override
@@ -83,12 +88,13 @@ final class ApexSimTelemetry extends SimTelemetry {
 
     @Override
     public synchronized boolean update() {
-        if (currentFrame.length() > 0) {
+        if (currentFrame.length() > 0 && frameOwner == Thread.currentThread()) {
             // Retain only the newest complete telemetry frame while rate-limited. FollowerTuner's
             // init selector calls update in a tight loop, so appending every frame would flood the
             // socket and Swing event queue.
             queuedFrame = currentFrame.toString();
             currentFrame.setLength(0);
+            frameOwner = null;
         }
 
         if (queuedFrame == null) {
@@ -106,5 +112,11 @@ final class ApexSimTelemetry extends SimTelemetry {
         lastTransmissionNanos = now;
         hasTransmitted = true;
         return true;
+    }
+
+    private void claimFrame() {
+        if (frameOwner == null) {
+            frameOwner = Thread.currentThread();
+        }
     }
 }

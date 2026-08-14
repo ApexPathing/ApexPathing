@@ -30,7 +30,6 @@ public class SimpleDriveTest extends LinearOpMode {
                 .interpolateWith(InterpolationStyle.TANGENT_FORWARD)
                 .quickBuild();
 
-        telemetry.addLine("Use B to stop all robot movement");
         telemetry.addLine("Press Start to begin");
         telemetry.update();
 
@@ -41,11 +40,6 @@ public class SimpleDriveTest extends LinearOpMode {
         while (opModeIsActive()) {
             follower.update();
             Pose pose = follower.getPose();
-
-            if (gamepad1.b) { // Halt the robot if B is pressed
-                follower.pause();
-                telemetry.addLine("Follower stopped");
-            }
 
             switch (currentState) {
                 case TEST_PATH:
@@ -70,5 +64,6 @@ public class SimpleDriveTest extends LinearOpMode {
             telemetry.addData("Back Right Motor Power", follower.getDrivetrain().getLastBrPower());
             telemetry.update();
         }
+        follower.stop();
     }
 }

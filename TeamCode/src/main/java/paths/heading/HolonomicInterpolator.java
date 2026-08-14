@@ -58,9 +58,10 @@ public class HolonomicInterpolator implements HeadingInterpolator {
             case SMOOTH_START_TO_END:
                 return endHeading;
             case TANGENT_FORWARD:
-            case TANGENT_BACKWARD:
             case TANGENT_OPTIMAL:
                 return finalTangent.getTheta();
+            case TANGENT_BACKWARD:
+                return finalTangent.getTheta().plus(Angle.fromRad(Math.PI));
             case TANGENT_CUSTOM:
                 return finalTangent.getTheta().plus(customOffset);
             case NODE_BASED:
@@ -129,7 +130,9 @@ public class HolonomicInterpolator implements HeadingInterpolator {
         double basePrime = 0.0;
         double pctTraveled = (pathLength - s) / pathLength;
 
-        if (style == InterpolationStyle.TANGENT_FORWARD || style == InterpolationStyle.TANGENT_CUSTOM) {
+        if (style == InterpolationStyle.TANGENT_FORWARD ||
+                style == InterpolationStyle.TANGENT_BACKWARD ||
+                style == InterpolationStyle.TANGENT_CUSTOM) {
             basePrime = kappa;
         } else if (style == InterpolationStyle.SMOOTH_START_TO_END) {
             // Chain rule: d(theta)/ds_traveled = d(theta)/d(pct) * (1 / pathLength)
@@ -155,7 +158,9 @@ public class HolonomicInterpolator implements HeadingInterpolator {
         double baseDoublePrime = 0.0;
         double pctTraveled = (pathLength - s) / pathLength;
 
-        if (style == InterpolationStyle.TANGENT_FORWARD || style == InterpolationStyle.TANGENT_CUSTOM) {
+        if (style == InterpolationStyle.TANGENT_FORWARD ||
+                style == InterpolationStyle.TANGENT_BACKWARD ||
+                style == InterpolationStyle.TANGENT_CUSTOM) {
             baseDoublePrime = dKappa;
         } else if (style == InterpolationStyle.SMOOTH_START_TO_END) {
             // Chain rule: d2(theta)/ds_traveled2 = d2(theta)/d(pct)2 * (1 / pathLength)^2

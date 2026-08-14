@@ -45,4 +45,21 @@ public class ApexSimTelemetryTest {
         assertEquals(2, frames.size());
         assertEquals("latest frame\n", frames.get(1));
     }
+
+    @Test
+    public void eventLoopUpdateDoesNotSplitAUserTelemetryFrame() throws Exception {
+        List<String> frames = new ArrayList<>();
+        ApexSimTelemetry telemetry = new ApexSimTelemetry(frames::add);
+        telemetry.setMsTransmissionInterval(0);
+
+        telemetry.addLine("first line");
+        Thread eventLoop = new Thread(telemetry::update);
+        eventLoop.start();
+        eventLoop.join();
+        telemetry.addLine("second line");
+
+        assertTrue(telemetry.update());
+        assertEquals(1, frames.size());
+        assertEquals("first line\nsecond line\n", frames.get(0));
+    }
 }

@@ -34,8 +34,10 @@ dependencies {
     // FTCodeSim is a desktop-only development tool. Keeping it on the unit-test classpath avoids
     // packaging simulator/desktop dependencies into the Robot Controller APK.
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
     testImplementation 'org.knowm.xchart:xchart:4.0.2'
-    // 9378778 initializes FtcDashboard's Android-only singleton on the desktop JVM. The previous
-    // published snapshot has the same simulator/DECODE APIs without that regression.
-    testImplementation 'org.codeblooded.ftcodesim:ftcodesim:SNAPSHOT-9b06f7d'
+    testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
+    // The README currently shows org.codeblooded.ftcodesim as the group, but the published
+    // SNAPSHOT-9cb1d09 POM uses org.codeblooded.
+    testImplementation 'org.codeblooded:Simulator:SNAPSHOT-9cb1d09'
 }

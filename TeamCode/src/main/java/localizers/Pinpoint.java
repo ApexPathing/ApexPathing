@@ -52,12 +52,14 @@ public class Pinpoint extends BaseLocalizer<Pinpoint.Constants> {
     public void update() {
         pinpoint.update();
         pose = pinpoint.getPosition();
-        velocity = pinpoint.getVelocity();
-        calculate(UpdateType.ACCELERATION);
+        calculate(pinpoint.getVelocity());
     }
 
     @Override
-    public void setPose(Pose newPose) { pinpoint.setPosition(newPose); }
+    public void setPose(Pose newPose) {
+        pinpoint.setPosition(newPose);
+        resetKinematicEstimate(newPose);
+    }
 
     /** Configuration class for goBILDA Pinpoint localizer. */
     public static class Constants implements BaseLocalizerConstants<Constants> {

@@ -21,7 +21,6 @@ public class TeleOpTest extends LinearOpMode {
     public void runOpMode() {
         Follower follower = new Follower(constants, hardwareMap);
 
-        telemetry.addLine("Use B to stop all robot movement");
         telemetry.addLine("Press Start to begin");
         telemetry.update();
         waitForStart();
@@ -30,12 +29,7 @@ public class TeleOpTest extends LinearOpMode {
             follower.update();
             Pose currentPose = follower.getPose();
 
-            if (gamepad1.b) { // Emergency stop
-                follower.stop();
-                telemetry.addLine("Follower stopped");
-            } else {
-                follower.manual(gamepad1);
-            }
+            follower.manual(gamepad1);
 
             loops++;
 
@@ -52,5 +46,6 @@ public class TeleOpTest extends LinearOpMode {
             telemetry.addData("Heading", currentPose.getHeading());
             telemetry.update();
         }
+        follower.stop();
     }
 }
