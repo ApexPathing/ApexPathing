@@ -319,19 +319,17 @@ public class FeedforwardTuner extends TuningPhase {
 
         double[] fit = robustFit(samples, kS, -1);
         double squaredError = 0.0;
-        double targetSum = 0.0;
+        double totalSquaredError = 0.0;
         for (Observation sample : samples) {
             double residual = predictionError(sample, kS, fit);
             squaredError += residual * residual;
-            targetSum += sample.power - kS;
+            double target = sample.power - kS;
+            totalSquaredError += target * target;
         }
         double rmse = Math.sqrt(squaredError / samples.size());
-        double targetMean = targetSum / samples.size();
-        double totalSquaredError = 0.0;
-        for (Observation sample : samples) {
-            double centered = (sample.power - kS) - targetMean;
-            totalSquaredError += centered * centered;
-        }
+        // kS is a known intercept, so the remaining kV/kA model is constrained through zero.
+        // Use the corresponding uncentered R-squared; centering around the narrow sampled-power
+        // mean can report a negative score for an otherwise accurate physical fit.
         double rSquared = totalSquaredError <= 1e-12
                 ? Double.NaN : 1.0 - squaredError / totalSquaredError;
 

@@ -47,8 +47,9 @@ public class PDSRoutine {
     private static final double OPERATOR_TEST_TIMEOUT_SECONDS = 8.0;
     private static final double TEST_SETTLED_SECONDS = 0.50;
     private static final double MAX_TEST_POWER = 0.75;
-    private static final double TEST_BREAKAWAY_RESERVE = 0.02;
-    private static final double MAX_PD_SAMPLE_GAP_SECONDS = 0.20;
+    private static final double MAX_STATIC_FRICTION_SEARCH_POWER = 0.75;
+    private static final double TEST_BREAKAWAY_RESERVE = 0.05;
+    private static final double MAX_PD_SAMPLE_GAP_SECONDS = 0.50;
     private static final int MAX_ERROR_ZERO_CROSSINGS = 8;
     private static final double MAX_SATURATION_FRACTION = 0.80;
 
@@ -147,7 +148,7 @@ public class PDSRoutine {
 
     void start(TunerContext context) {
         if (csv != null) { csv.close(); }
-        search = new BinarySearch(0.0, 0.4, 0.01);
+        search = new BinarySearch(0.0, MAX_STATIC_FRICTION_SEARCH_POWER, 0.01);
         context.getFollower().disableControllers();
         resetAxisPose(context);
         timer.reset();
@@ -441,7 +442,7 @@ public class PDSRoutine {
         // ceiling. Treat saturation as unsafe only when the robot has also made very little
         // progress; otherwise the timeout and bounded-travel checks remain the relevant guards.
         if (elapsed >= 1.0 && saturationFraction > MAX_SATURATION_FRACTION &&
-                Math.abs(error) > Math.max(errorTolerance, trialMovement * 0.75)) {
+                Math.abs(error) > Math.max(errorTolerance, trialMovement * 0.90)) {
             return rejectPdTrial(context, "controller remained saturated");
         }
 

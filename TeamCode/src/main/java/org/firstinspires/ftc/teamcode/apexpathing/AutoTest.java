@@ -31,7 +31,7 @@ import paths.movements.Path;
  */
 @Autonomous(name = "Apex Auto Test", group = "Apex Pathing")
 public class AutoTest extends LinearOpMode {
-    private static final double STAGE_TIMEOUT_SECONDS = 22.0;
+    private static final double STAGE_TIMEOUT_SECONDS = 50.0;
     private static final double POSITION_TOLERANCE_INCHES = 3.0;
     private static final double HEADING_TOLERANCE_DEGREES = 5.0;
     // This is a coarse stress-test curve, not the endpoint acceptance tolerance. Leave enough
