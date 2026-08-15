@@ -33,7 +33,7 @@ public class AutoTest extends LinearOpMode {
         FollowerMovement testXMove = factory.path(testYMove.getEndPose(),
                         factory.pose(30, 30, 90))
                 .interpolateWith(InterpolationStyle.CONSTANT_END_HEADING)
-                .quickBuild();
+                .profiledBuild();
 
         FollowerMovement testTurn = factory.turn(testXMove.getEndPose())
                 .turnTo(Angle.fromDeg(180))

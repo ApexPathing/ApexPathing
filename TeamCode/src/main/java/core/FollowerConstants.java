@@ -42,6 +42,7 @@ public class FollowerConstants {
     public double strafeAccelLimitIn = 0.0;
     public double angularVelLimitRad = 0.0;
     public double angularAccelLimitRad = 0.0;
+    public double maxCentripetalAccelIn = 0.0;
 
     private FollowerConstants() { reload(); }
 
@@ -105,6 +106,7 @@ public class FollowerConstants {
         strafeAccelLimitIn = loadDouble(json, "strafeAccelLimitIn");
         angularVelLimitRad = loadDouble(json, "angularVelLimitRad");
         angularAccelLimitRad = loadDouble(json, "angularAccelLimitRad");
+        maxCentripetalAccelIn = loadDouble(json, "maxCentripetalAccelIn");
     }
 
     public JSONObject toJson() {
@@ -130,6 +132,7 @@ public class FollowerConstants {
             json.put("strafeAccelLimitIn", strafeAccelLimitIn);
             json.put("angularVelLimitRad", angularVelLimitRad);
             json.put("angularAccelLimitRad", angularAccelLimitRad);
+            json.put("maxCentripetalAccelIn", maxCentripetalAccelIn);
         } catch (Exception ignored) {
             // JSONObject only rejects unsupported values; all fields above are primitives.
         }

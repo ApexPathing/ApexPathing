@@ -33,7 +33,7 @@ public class TankProfileGenerator extends BaseProfileGenerator {
     @Override
     protected double calculateMaxTangentialVelocity(PathPoint point,
                                                     Path path, double maxAngVel,
-                                                    double maxAngAccel) {
+                                                    double maxAngAccel, double maxCentripetalAccelIn) {
         double s = point.getDistanceToEndIn();
         double kappa = point.getSignedCurvature();
         double dKappa = point.getCurvatureDerivative();
@@ -52,7 +52,8 @@ public class TankProfileGenerator extends BaseProfileGenerator {
         // Angular velocity limit: |f' * v| <= omega_max, so v <= omega_max / |f'|.
         if (Math.abs(fPrime) > EPSILON) {
             double maxVelFromOmega = effectiveAngVelLimit / Math.abs(fPrime);
-            maxPhysicalVel = Math.min(maxPhysicalVel, maxVelFromOmega);
+            double maxCentripetalVel = Math.sqrt(maxCentripetalAccelIn * (1.0 / kappa));
+            maxPhysicalVel = Math.min(maxPhysicalVel, Math.min(maxVelFromOmega, maxCentripetalVel));
         }
 
         // Angular acceleration limit at zero tangential accel: |f'' * v^2| <= alpha_max.

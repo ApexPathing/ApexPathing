@@ -26,7 +26,8 @@ public class SwerveProfileGenerator extends BaseProfileGenerator {
 
     @Override
     protected double calculateMaxTangentialVelocity(PathPoint point, Path path,
-                                                    double maxAngVel, double maxAngAccel) {
+                                                    double maxAngVel, double maxAngAccel,
+                                                    double maxCentripetalAccelIn) {
         double s = point.getDistanceToEndIn();
         double kappa = point.getSignedCurvature();
         double dKappa = point.getCurvatureDerivative();

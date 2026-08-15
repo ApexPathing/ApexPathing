@@ -54,7 +54,8 @@ public abstract class BaseProfileGenerator {
      * @return maximum tangential velocity allowed at this sample
      */
     protected abstract double calculateMaxTangentialVelocity(PathPoint point, Path path,
-                                                             double maxAngVel, double maxAngAccel);
+                                                             double maxAngVel, double maxAngAccel,
+                                                             double maxCentripetalAccel);
 
     /**
      * Evaluates normalized drivetrain utilization for the segment ending at {@code current}.
@@ -326,7 +327,7 @@ public abstract class BaseProfileGenerator {
             // Let the drivetrain-specific subclass translate heading/curvature demand into a
             // local top speed, then apply any explicit translational velocity constraint.
             double maxVel = calculateMaxTangentialVelocity(points[i], path, currentMaxAngVel,
-                    currentMaxAngAccel);
+                    currentMaxAngAccel, constants.maxCentripetalAccelIn);
             if (currentMaxVel != Double.MAX_VALUE && currentMaxVel > 0.0) {
                 maxVel = Math.min(maxVel, currentMaxVel);
             }
