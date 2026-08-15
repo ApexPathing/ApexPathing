@@ -36,7 +36,7 @@ public class MecanumProfileGenerator extends BaseProfileGenerator {
 
     @Override
     protected double calculateMaxTangentialVelocity(PathPoint point, Path path, double maxAngVel,
-                                                    double maxAngAccel) {
+                                                    double maxAngAccel, double maxCentripetalAccelIn) {
         double s = point.getDistanceToEndIn();
         Vector tangent = point.getFirstDerivative();
         double kappa = point.getSignedCurvature();
@@ -95,13 +95,13 @@ public class MecanumProfileGenerator extends BaseProfileGenerator {
     private double evaluatePower(double v, double kappa, double fPrime,
                                  double fDoublePrime, DirectionalKinematics tangentKinematics,
                                  DirectionalKinematics normalKinematics) {
-        // Apply the LUT as power cost multipliers instead of pretending strafe is as efficient.
         double boostedKV = constants.translationalKV * tangentKinematics.velMultiplier;
-        double transPower = v * boostedKV
-                + signedStatic(v, 0.0, constants.translationalCoeffs.kS);
+        double transPower = (v * constants.translationalKV
+                + signedStatic(v, 0.0, constants.translationalCoeffs.kS))
+                * tangentKinematics.velMultiplier;
 
         double latPower = Math.abs(
-                v * v * kappa * constants.kCentripetal * normalKinematics.accelMultiplier
+                v * v * kappa * constants.kCentripetal * normalKinematics.velMultiplier
         );
 
         double omega = fPrime * v;
@@ -136,12 +136,10 @@ public class MecanumProfileGenerator extends BaseProfileGenerator {
         double omega = fPrime * v;
         double alpha = fDoublePrime * (v * v) + fPrime * a_t;
 
-        double pForward = v * constants.translationalKV * dirK.velMultiplier
-                + a_t * constants.translationalKA * dirK.accelMultiplier
-                + signedStatic(v, a_t, constants.translationalCoeffs.kS);
+        double pForward = (v * constants.translationalKV + a_t * constants.translationalKA
+                + signedStatic(v, a_t, constants.translationalCoeffs.kS)) * dirK.velMultiplier;
 
-        // Centripetal correction is a sideways force, so mecanum inefficiency applies here too.
-        double pLateral = v * v * kappa * constants.kCentripetal * normalK.accelMultiplier;
+        double pLateral = Math.abs(v * v * kappa * constants.kCentripetal * normalK.velMultiplier);
 
         double headingKs = signedStatic(omega, alpha, constants.angularCoeffs.kS);
         double pHeading = omega * constants.angularKV + alpha * constants.angularKA + headingKs;
