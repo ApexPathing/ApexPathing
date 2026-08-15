@@ -43,7 +43,7 @@ public class AutoTest extends LinearOpMode {
         FollowerMovement testArc = factory.path(testTurn.getEndPose(),
                         factory.pose(30,0),
                         factory.pose(0,0),
-                        factory.pose(0, 30, 0))
+                        factory.pose(0, 30, 180))
                 .interpolateWith(InterpolationStyle.CONSTANT_END_HEADING)
                 .profiledBuild();
         FollowerMovement strafeBackPath = factory.path(testArc.getEndPose(),
