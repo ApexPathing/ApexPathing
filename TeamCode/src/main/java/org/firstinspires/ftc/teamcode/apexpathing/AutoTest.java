@@ -36,7 +36,7 @@ public class AutoTest extends LinearOpMode {
                 .quickBuild();
 
         FollowerMovement testTurn = factory.turn(testXMove.getEndPose())
-                .turnTo(Angle.fromDeg(0))
+                .turnTo(Angle.fromDeg(180))
                 .addAngularCallback(Angle.fromDeg(45), this::exampleAngularCallback)
                 .profiledBuild();
 
